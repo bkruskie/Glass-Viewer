@@ -54,6 +54,58 @@ internal object TrackMuxer {
         }
     }
 
+    private const val AAC = "audio/mp4a-latm"
+
+    /**
+     * Length of the ADTS header at the start of [buf] (7, or 9 with CRC) when the sample
+     * is a whole ADTS frame of [size] bytes; 0 otherwise. Android's MPEG-TS extractor can
+     * hand out AAC frames with this header still attached, but MP4 stores raw AAC: left
+     * in, players can't decode the sound and the video plays silent.
+     */
+    internal fun adtsHeaderLength(buf: ByteBuffer, size: Int): Int {
+        if (size < 9) return 0
+        val b0 = buf.get(0).toInt() and 0xFF
+        val b1 = buf.get(1).toInt() and 0xFF
+        if (b0 != 0xFF || (b1 and 0xF6) != 0xF0) return 0 // sync word, layer 0
+        val frameLength = ((buf.get(3).toInt() and 0x03) shl 11) or
+            ((buf.get(4).toInt() and 0xFF) shl 3) or
+            ((buf.get(5).toInt() and 0xE0) ushr 5)
+        if (frameLength != size) return 0
+        return if ((b1 and 0x01) == 1) 7 else 9
+    }
+
+    /** AudioSpecificConfig (csd-0) built from an ADTS header, for when the extractor doesn't supply one. */
+    private fun audioSpecificConfig(buf: ByteBuffer): ByteBuffer {
+        val b2 = buf.get(2).toInt() and 0xFF
+        val b3 = buf.get(3).toInt() and 0xFF
+        val profile = ((b2 ushr 6) and 0x03) + 1
+        val freqIndex = (b2 ushr 2) and 0x0F
+        val channels = ((b2 and 0x01) shl 2) or ((b3 ushr 6) and 0x03)
+        return ByteBuffer.wrap(
+            byteArrayOf(
+                ((profile shl 3) or (freqIndex ushr 1)).toByte(),
+                (((freqIndex and 0x01) shl 7) or (channels shl 3)).toByte(),
+            ),
+        )
+    }
+
+    /** Makes sure an AAC track format carries codec config; reads the first frame's ADTS header if needed. */
+    private fun ensureAacConfig(file: File, track: Int, format: MediaFormat) {
+        if (format.containsKey("csd-0")) return
+        val ex = MediaExtractor()
+        try {
+            ex.setDataSource(file.absolutePath)
+            ex.selectTrack(track)
+            val buf = ByteBuffer.allocate(64 * 1024)
+            val size = ex.readSampleData(buf, 0)
+            if (size > 0 && adtsHeaderLength(buf, size) > 0) format.setByteBuffer("csd-0", audioSpecificConfig(buf))
+        } catch (e: Exception) {
+            // leave as is; addTrack will report if it can't work
+        } finally {
+            runCatching { ex.release() }
+        }
+    }
+
     /** e.g. "video/avc 1280x720, audio/mp4a-latm 48000 Hz 2 ch". */
     fun describe(file: File): String {
         val ex = MediaExtractor()
@@ -99,11 +151,15 @@ internal object TrackMuxer {
         var muxer: MediaMuxer? = null
         try {
             val selected = mutableListOf<Triple<Source, Int, MediaFormat>>()
-            for (source in sources) {
+            for ((index, source) in sources.withIndex()) {
                 val ex = source.extractor
                 for (t in 0 until ex.trackCount) {
                     val format = ex.getTrackFormat(t)
                     val mime = format.getString(MediaFormat.KEY_MIME).orEmpty()
+                    if (mime == AAC) {
+                        ensureAacConfig(inputs[index], t, format)
+                        format.setInteger("is-adts", 0)
+                    }
                     if (mime.startsWith("video/") || mime.startsWith("audio/")) {
                         ex.selectTrack(t)
                         selected += Triple(source, t, format)
@@ -130,8 +186,13 @@ internal object TrackMuxer {
                 if (webm) MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM else MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4,
             )
             muxer = m
+            val aacTracks = mutableSetOf<Int>()
             try {
-                for ((source, track, format) in selected) source.trackMap[track] = m.addTrack(format)
+                for ((source, track, format) in selected) {
+                    val muxTrack = m.addTrack(format)
+                    source.trackMap[track] = muxTrack
+                    if (format.getString(MediaFormat.KEY_MIME) == AAC) aacTracks += muxTrack
+                }
             } catch (e: Exception) {
                 throw DownloadException("This phone can't package this stream's format (${mimes.joinToString()}).")
             }
@@ -179,7 +240,8 @@ internal object TrackMuxer {
                     val keyFrame = (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
                     // Each source starts at 0; tracks inside one source keep their relative timing.
                     val time = (ex.sampleTime - source.offsetUs).coerceAtLeast(0)
-                    info.set(0, size, time, if (keyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                    val skip = if (target in aacTracks) adtsHeaderLength(buffer, size) else 0
+                    info.set(skip, size - skip, time, if (keyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     m.writeSampleData(target, buffer, info)
                 }
                 ex.advance()
