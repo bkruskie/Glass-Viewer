@@ -181,6 +181,9 @@ internal class HlsDownloader(private val http: Http) {
     }
 }
 
+/** What will be downloaded for an HLS stream, plus notes for the Technical details view. */
+internal data class HlsTracks(val video: String, val audio: String?, val notes: List<String>)
+
 /**
  * Finds the video playlist to download and, if the stream carries sound separately,
  * the audio playlist. Re-reads the master so links with expiring tokens are fresh,
@@ -192,20 +195,33 @@ internal suspend fun resolveHlsTracks(
     masterUrl: String,
     targetHeight: Int?,
     targetBitrate: Long?,
-): Pair<String, String?> {
+): HlsTracks {
+    val notes = mutableListOf<String>()
     suspend fun master(link: String): HlsPlaylist.Master? = runCatching {
         val (text, finalUrl) = retrying { http.text(link) }
         HlsPlaylistParser.parse(text, finalUrl) as? HlsPlaylist.Master
     }.getOrNull()
 
     val fromMaster = (if (masterUrl != url) master(masterUrl) else null) ?: master(url)
-    if (fromMaster != null) {
-        val chosenUrl = if (url == masterUrl) null else url
-        val variant = fromMaster.match(chosenUrl, targetHeight, targetBitrate)
-            ?: throw DownloadException("The stream lists no qualities.")
-        return variant.url to fromMaster.audioFor(variant)
+    if (fromMaster == null) {
+        notes += "No master playlist found (only a single quality playlist); separate audio can't be looked up."
+        return HlsTracks(url, null, notes)
     }
-    return url to null
+    val chosenUrl = if (url == masterUrl) null else url
+    val variant = fromMaster.match(chosenUrl, targetHeight, targetBitrate)
+        ?: throw DownloadException("The stream lists no qualities.")
+    val audio = fromMaster.audioFor(variant)
+    val renditions = fromMaster.renditions.filter { it.type == "AUDIO" }
+    notes += "Master: ${fromMaster.variants.size} qualities, ${renditions.size} audio tracks " +
+        "(${renditions.count { it.uri != null }} separate)."
+    notes += "Chosen: ${variant.height ?: "?"}p, codecs=${variant.codecs ?: "not listed"}, " +
+        "audio group=${fromMaster.audioGroups[variant.url] ?: "none"}."
+    notes += if (audio != null) "Separate audio: ${shortUrl(audio)}" else "Separate audio: none (sound expected inside the video)."
+    return HlsTracks(variant.url, audio, notes)
+}
+
+internal fun shortUrl(url: String): String = url.substringAfter("://").substringBefore('?').let {
+    if (it.length > 90) it.take(40) + "…" + it.takeLast(45) else it
 }
 
 /** Packed-audio HLS segments start with an ID3 tag; drop it so the segments join into one clean stream. */

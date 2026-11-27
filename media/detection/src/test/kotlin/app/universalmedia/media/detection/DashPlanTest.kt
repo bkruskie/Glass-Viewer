@@ -116,6 +116,7 @@ class DashPlanTest {
         """.trimIndent()
         val p = HlsPlaylistParser.parse(master, "https://e.com/s/master.m3u8") as HlsPlaylist.Master
         assertEquals("https://e.com/s/audio/en.m3u8", p.audioFor("https://e.com/s/v/1080.m3u8"))
-        assertNull(p.audioFor("https://e.com/s/v/360.m3u8"))
+        // No codecs listed and the stream offers separate audio: include it rather than risk silence.
+        assertEquals("https://e.com/s/audio/en.m3u8", p.audioFor("https://e.com/s/v/360.m3u8"))
     }
 }

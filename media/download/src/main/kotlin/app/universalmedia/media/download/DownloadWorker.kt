@@ -32,6 +32,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     private val env: DownloadEnvironment
         get() = (applicationContext as DownloadEnvironmentProvider).downloadEnvironment
 
+    /** Troubleshooting notes shown under "Technical details" in Downloads. */
+    private val notes = mutableListOf<String>()
+
     override suspend fun doWork(): Result {
         val id = inputData.getString(KEY_ID) ?: return Result.failure()
         val dao = env.dao
@@ -107,10 +110,19 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val extension: String
         when (format) {
             MediaFormat.HLS -> {
-                val (videoUrl, audioUrl) = if (job.audioOnly) url to null else resolveHlsTracks(http, url, job.mediaUrl, job.targetHeight, job.targetBitrate)
+                notes += "Format: HLS stream"
+                val tracks = if (job.audioOnly) {
+                    HlsTracks(url, null, listOf("Audio-only quality chosen."))
+                } else {
+                    resolveHlsTracks(http, url, job.mediaUrl, job.targetHeight, job.targetBitrate)
+                }
+                notes += tracks.notes
+                val videoUrl = tracks.video
+                val audioUrl = tracks.audio
                 if (audioUrl == null) {
                     val part = File(dir, "${job.id}.hls")
                     val out = HlsDownloader(http).download(videoUrl, part, resumeInner, progressFor(0))
+                    notes += "Downloaded (${if (out.fragmentedMp4) "fMP4" else "MPEG-TS"}): ${TrackMuxer.describe(part)}"
                     if (out.fragmentedMp4) {
                         finished = out.file
                         mime = if (job.audioOnly) "audio/mp4" else "video/mp4"
@@ -119,7 +131,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                         // Repackage MPEG-TS as MP4 (no re-encoding); keep the .ts if this phone can't.
                         showProgress(job.title, part.length(), part.length(), "Finishing…")
                         val mp4 = withContext(Dispatchers.IO) {
-                            runCatching { TrackMuxer.mux(listOf(part), dir, "${job.id}.out") }.getOrNull()
+                            runCatching { TrackMuxer.mux(listOf(part), dir, "${job.id}.out") }
+                                .onFailure { notes += "MP4 conversion failed: ${it.message ?: it.javaClass.simpleName}; keeping .ts" }
+                                .getOrNull()
                         }
                         if (mp4 != null && mp4.file.length() > 0) {
                             part.delete()
@@ -138,6 +152,8 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     val files = listOf(File(dir, "${job.id}.v.hls"), File(dir, "${job.id}.a.hls"))
                     val urls = listOf(videoUrl, audioUrl)
                     phases(files) { i, file, state -> HlsDownloader(http).download(urls[i], file, state, progressFor(i)) }
+                    notes += "Downloaded video: ${TrackMuxer.describe(files[0])}"
+                    notes += "Downloaded audio: ${TrackMuxer.describe(files[1])}"
                     showProgress(job.title, bytesBeforePhase, bytesBeforePhase, "Finishing…")
                     val out = withContext(Dispatchers.IO) { TrackMuxer.mux(files, dir, "${job.id}.out") }
                     files.forEach { it.delete() }
@@ -153,6 +169,8 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 if (plan.isLive) throw DownloadException("Live streams can't be saved yet.")
                 val tracks = plan.select(job.targetHeight, job.targetBitrate, job.audioOnly)
                 if (tracks.isEmpty()) throw DownloadException("The stream lists no downloadable tracks.")
+                notes += "Format: DASH, ${plan.videoTracks.size} video and ${plan.audioTracks.size} audio tracks; " +
+                    "chosen: " + tracks.joinToString { (if (it.isAudio) "audio " else "video ") + (it.height?.let { h -> "${h}p " } ?: "") + (it.codecs ?: "") }
                 val files = tracks.indices.map { File(dir, "${job.id}.d$it") }
                 phases(files) { i, file, state ->
                     val track = tracks[i]
@@ -187,6 +205,8 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             }
         }
 
+        if (format != MediaFormat.HLS && format != MediaFormat.DASH) notes += "Format: single file (${format.displayName})"
+        notes += "Saved file ($extension): ${TrackMuxer.describe(finished)}"
         val silent = !mime.startsWith("audio/") && !job.audioOnly && TrackMuxer.hasNoAudio(finished)
         val isAudio = mime.startsWith("audio/") || job.audioOnly
         val fileName = job.fileName.substringBeforeLast('.') + "." + extension
@@ -199,6 +219,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val thumbnail = runCatching { Thumbnails.create(ctx, uri, job.id, isAudio) }.getOrNull()
         env.dao.markCompleted(job.id, uri.toString(), fileName, mime, size, now)
         env.dao.setThumbnail(job.id, thumbnail)
+        env.dao.setInfo(job.id, notes.joinToString("\n"))
         if (silent) {
             env.dao.setStatus(
                 job.id, DownloadStatus.COMPLETED.name,
@@ -243,6 +264,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             return Result.retry()
         }
         env.dao.setStatus(id, DownloadStatus.FAILED.name, message, now())
+        env.dao.setInfo(id, (notes + "Failed: $message").joinToString("\n"))
         env.dao.get(id)?.let { notifyFinished(id, it.title, "Download failed: $message") }
         return Result.failure()
     }

@@ -52,7 +52,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -77,6 +82,8 @@ fun DownloadsScreen(
     val downloads by remember(manager) { manager.observe() }.collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var details by remember { mutableStateOf<DownloadEntity?>(null) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -121,10 +128,33 @@ fun DownloadsScreen(
                         onRemove = { scope.launch { manager.remove(item.id) } },
                         onOpen = { openFile(context, item) },
                         onPlay = { onPlay(item) },
+                        onDetails = { details = item },
                     )
                 }
             }
         }
+    }
+
+    details?.let { item ->
+        val text = technicalText(item)
+        AlertDialog(
+            onDismissRequest = { details = null },
+            title = { Text("Technical details") },
+            text = {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(text))
+                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                }) { Text("Copy") }
+            },
+            dismissButton = { TextButton(onClick = { details = null }) { Text("Close") } },
+        )
     }
 }
 
@@ -139,6 +169,7 @@ private fun DownloadRow(
     onRemove: () -> Unit,
     onOpen: () -> Unit,
     onPlay: () -> Unit,
+    onDetails: () -> Unit,
 ) {
     val status = item.statusEnum
     var menu by remember { mutableStateOf(false) }
@@ -242,6 +273,7 @@ private fun DownloadRow(
                         onClick = { menu = false; onCancel() },
                     )
                 }
+                DropdownMenuItem(text = { Text("Technical details") }, onClick = { menu = false; onDetails() })
                 DropdownMenuItem(
                     text = { Text(if (status == DownloadStatus.COMPLETED) "Remove from list (keeps file)" else "Remove from list") },
                     onClick = { menu = false; onRemove() },
@@ -250,6 +282,13 @@ private fun DownloadRow(
         }
     }
 }
+
+private fun technicalText(item: DownloadEntity): String = buildString {
+    appendLine(item.title)
+    appendLine("Status: ${item.status}" + (item.errorMessage?.let { " – $it" } ?: ""))
+    item.variantLabel?.let { appendLine("Quality: $it") }
+    appendLine(item.info ?: "No details were recorded (downloaded with an older version).")
+}.trim()
 
 private fun openFile(context: Context, item: DownloadEntity) {
     val uri = item.destinationUri ?: return

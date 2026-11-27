@@ -55,6 +55,9 @@ data class DownloadEntity(
     // ---- v4 ----
     /** Preview image (JPEG in app storage). */
     val thumbnailPath: String? = null,
+    // ---- v5 ----
+    /** Technical notes from the download (sources found, conversion, tracks), for troubleshooting. */
+    val info: String? = null,
 )
 
 /** Anything in the user's library: downloads and imported local files. */

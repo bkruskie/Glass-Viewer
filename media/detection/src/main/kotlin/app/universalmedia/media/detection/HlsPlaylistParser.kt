@@ -44,10 +44,12 @@ sealed interface HlsPlaylist {
                 val withUri = inGroup.filter { it.uri != null }
                 (withUri.firstOrNull { it.isDefault } ?: withUri.firstOrNull())?.let { return it.uri }
             }
-            val codecs = variant.codecs?.lowercase() ?: return null
-            val hasAudioCodec = AUDIO_CODECS.any { codecs.contains(it) }
-            if (hasAudioCodec) return null
             val separate = audio.filter { it.uri != null }
+            if (separate.isEmpty()) return null
+            val codecs = variant.codecs?.lowercase()
+            // Codecs that name an audio format mean the sound is inside the video.
+            if (codecs != null && AUDIO_CODECS.any { codecs.contains(it) }) return null
+            // Video-only codecs, or none listed while the stream offers separate audio: use it.
             return (separate.firstOrNull { it.isDefault } ?: separate.firstOrNull())?.uri
         }
 

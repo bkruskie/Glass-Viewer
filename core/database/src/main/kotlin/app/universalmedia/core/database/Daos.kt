@@ -75,6 +75,9 @@ interface DownloadDao {
     )
     suspend fun markCompleted(id: String, uri: String, fileName: String, mimeType: String, bytes: Long, updatedAt: Long)
 
+    @Query("UPDATE downloads SET info = :info WHERE id = :id")
+    suspend fun setInfo(id: String, info: String?)
+
     @Query("UPDATE downloads SET thumbnailPath = :path WHERE id = :id")
     suspend fun setThumbnail(id: String, path: String?)
 

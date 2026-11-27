@@ -54,6 +54,30 @@ internal object TrackMuxer {
         }
     }
 
+    /** e.g. "video/avc 1280x720, audio/mp4a-latm 48000 Hz 2 ch". */
+    fun describe(file: File): String {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(file.absolutePath)
+            (0 until ex.trackCount).joinToString(", ") { t ->
+                val f = ex.getTrackFormat(t)
+                val mime = f.getString(MediaFormat.KEY_MIME).orEmpty()
+                when {
+                    mime.startsWith("video/") && f.containsKey(MediaFormat.KEY_WIDTH) ->
+                        "$mime ${f.getInteger(MediaFormat.KEY_WIDTH)}x${f.getInteger(MediaFormat.KEY_HEIGHT)}"
+                    mime.startsWith("audio/") && f.containsKey(MediaFormat.KEY_SAMPLE_RATE) ->
+                        "$mime ${f.getInteger(MediaFormat.KEY_SAMPLE_RATE)} Hz" +
+                            (if (f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) " ${f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)} ch" else "")
+                    else -> mime
+                }
+            }.ifBlank { "no tracks found" }
+        } catch (e: Exception) {
+            "unreadable (${e.javaClass.simpleName})"
+        } finally {
+            runCatching { ex.release() }
+        }
+    }
+
     /** True when [file] has a video track but no audio track. */
     fun hasNoAudio(file: File): Boolean {
         val ex = MediaExtractor()
