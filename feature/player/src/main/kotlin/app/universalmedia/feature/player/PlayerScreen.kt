@@ -311,6 +311,17 @@ private fun VideoSurface(
     }
 }
 
+private fun openElsewhere(context: Context, request: PlayRequest) {
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(Uri.parse(request.uri), request.mimeType ?: "video/*")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(intent, request.title))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No other app can open this", Toast.LENGTH_SHORT).show()
+    }
+}
+
 /** Display aspect ratio (width ÷ height, pixel shape included); 16:9 until the size is known. */
 private fun VideoSize.aspect(): Float =
     if (width > 0 && height > 0) width * pixelWidthHeightRatio / height else 16f / 9f
