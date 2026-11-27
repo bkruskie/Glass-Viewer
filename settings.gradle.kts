@@ -23,6 +23,7 @@ dependencyResolutionManagement {
 rootProject.name = "UniversalMedia"
 
 include(":app")
+include(":receiver")
 
 // Core
 include(":core:model")
@@ -36,6 +37,8 @@ include(":media:detection")
 include(":media:download")
 include(":media:playback")
 include(":media:cast")
+include(":media:mirror")
+include(":media:mirror-protocol")
 
 // Features
 include(":feature:browser")

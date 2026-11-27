@@ -17,6 +17,7 @@ import app.universalmedia.media.download.MediaDownloadManager
 import app.universalmedia.media.playback.PlaybackManager
 import app.universalmedia.media.playback.PlaybackHost
 import app.universalmedia.media.cast.CastManager
+import app.universalmedia.media.mirror.ReceiverDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,6 +82,9 @@ class AppContainer(private val application: Application) {
 
     /** TV casting (Google Cast, DLNA, TV browser); create and use on the main thread. */
     val cast: CastManager by lazy { CastManager(application, httpClient, appScope) }
+
+    /** Finds TV receiver apps for screen mirroring. */
+    val mirrorDiscovery: ReceiverDiscovery by lazy { ReceiverDiscovery(application) }
 
     /** App-wide player; create and use on the main thread. */
     val playback: PlaybackManager by lazy {

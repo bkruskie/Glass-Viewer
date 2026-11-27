@@ -75,16 +75,11 @@ import app.universalmedia.media.cast.CastDevice
 import app.universalmedia.media.cast.CastItem
 import app.universalmedia.media.cast.CastKind
 import app.universalmedia.media.cast.CastManager
+import app.universalmedia.media.mirror.ReceiverDiscovery
 
 private data class InfoCard(val key: String, val icon: ImageVector, val title: String, val subtitle: String, val details: String)
 
 private val moreWays = listOf(
-    InfoCard(
-        "mirror", Icons.Rounded.ScreenShare, "Mirror your screen",
-        "Coming soon. For now, use your phone's own Smart View / Cast screen.",
-        "Screen mirroring with a free TV receiver app is the next big feature. Until then, swipe down on your phone " +
-            "and use Smart View (Samsung) or Cast screen; most smart TVs accept it.",
-    ),
     InfoCard(
         "transfer", Icons.Rounded.SwapHoriz, "Send to a device",
         "Coming soon: move files between phones and computers on your Wi-Fi.",
@@ -101,6 +96,7 @@ private val moreWays = listOf(
 @Composable
 fun ConnectScreen(
     cast: CastManager,
+    mirrorDiscovery: ReceiverDiscovery,
     mediaItemDao: MediaItemDao,
     nowPlaying: CastItem?,
     pendingItem: CastItem?,
@@ -201,16 +197,13 @@ fun ConnectScreen(
                 }
             }
 
+            MirrorSection(mirrorDiscovery)
+
             SectionHeader("More ways")
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 moreWays.forEach { card ->
                     FeatureCard(card.icon, card.title, card.subtitle, onClick = { openInfo = card.key })
                 }
-                FeatureCard(
-                    Icons.Rounded.Computer,
-                    "Android TV & Fire TV app",
-                    "Coming soon: a free receiver app for the smoothest playback and mirroring.",
-                )
             }
         }
     }

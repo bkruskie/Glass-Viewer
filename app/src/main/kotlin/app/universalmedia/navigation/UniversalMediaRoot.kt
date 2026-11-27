@@ -349,6 +349,7 @@ fun UniversalMediaRoot(
                 composable(TopDestination.CONNECT.route) {
                     ConnectScreen(
                         cast = container.cast,
+                        mirrorDiscovery = container.mirrorDiscovery,
                         mediaItemDao = container.database.mediaItemDao(),
                         nowPlaying = playingNow?.let { CastItem(it.title, it.uri, it.mimeType) },
                         pendingItem = pendingCast,

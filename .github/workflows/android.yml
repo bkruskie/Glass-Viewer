@@ -27,8 +27,8 @@ jobs:
       - name: Lint
         run: ./gradlew :app:lintDebug
 
-      - name: Build APK
-        run: ./gradlew :app:assembleDebug
+      - name: Build APKs
+        run: ./gradlew :app:assembleDebug :receiver:assembleDebug
 
       - name: Prepare APK
         id: apk
@@ -36,11 +36,14 @@ jobs:
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           cp app/build/outputs/apk/debug/*.apk UniversalMedia.apk
+          cp receiver/build/outputs/apk/debug/*.apk UniversalMediaReceiver.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: universal-media-debug-apk
-          path: UniversalMedia.apk
+          path: |
+            UniversalMedia.apk
+            UniversalMediaReceiver.apk
 
       # Every build of main becomes the "Latest" release, so the newest APK is always at
       # https://github.com/<owner>/<repo>/releases/latest/download/UniversalMedia.apk
@@ -51,9 +54,12 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: Universal Media ${{ steps.apk.outputs.version }} (build ${{ github.run_number }})
           make_latest: true
-          files: UniversalMedia.apk
+          files: |
+            UniversalMedia.apk
+            UniversalMediaReceiver.apk
           body: |
             Test build ${{ github.run_number }} from commit ${{ github.sha }}.
 
-            Install: download UniversalMedia.apk on your phone and open it.
+            Phone: download UniversalMedia.apk and open it.
+            Android TV / Google TV / Fire TV (screen mirroring): install UniversalMediaReceiver.apk on the TV.
             Samsung phones: turn off Settings → Security and privacy → Auto Blocker while installing.
