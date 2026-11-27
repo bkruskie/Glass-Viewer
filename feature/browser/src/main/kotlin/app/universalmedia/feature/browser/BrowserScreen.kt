@@ -98,6 +98,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.universalmedia.core.database.BookmarkEntity
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.MediaVariant
+import app.universalmedia.media.detection.MediaGrouping
 import app.universalmedia.core.ui.components.FeatureCard
 import app.universalmedia.core.ui.components.GlowIcon
 import app.universalmedia.core.ui.components.SectionHeader
@@ -208,9 +209,10 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                 )
             }
+            val organized = remember(tab.detected) { MediaGrouping.organize(tab.detected) }
             DetectedMediaButton(
-                visible = tab.detected.isNotEmpty() && !tab.isStartPage,
-                count = tab.detected.size,
+                visible = organized.isNotEmpty() && !tab.isStartPage,
+                count = organized.size,
                 onClick = { sheet = BrowserSheet.MEDIA },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             )

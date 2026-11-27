@@ -14,10 +14,12 @@ import app.universalmedia.core.model.AppSettings
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.DetectionOrigin
 import app.universalmedia.media.detection.MediaDetectionEngine
+import app.universalmedia.media.detection.PageSourceScanner
 import app.universalmedia.media.detection.ResolveRequest
 import app.universalmedia.media.detection.ResolveResult
 import app.universalmedia.media.detection.UrlUtils
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -197,8 +199,9 @@ class BrowserViewModel(
         viewModelScope.launch { historyDao.clear() }
     }
 
-    fun dismissDetected(tabId: String, mediaId: String) = updateTab(tabId) { tab ->
-        tab.copy(detected = tab.detected.filterNot { it.id == mediaId })
+    /** Hides an organized entry and every quality it stands for. */
+    fun dismissDetected(tabId: String, urls: Set<String>) = updateTab(tabId) { tab ->
+        tab.copy(detected = tab.detected.filterNot { it.mediaUrl in urls })
     }
 
     // ---- Events from WebView (see WebViewPool) -------------------------------
@@ -257,6 +260,13 @@ class BrowserViewModel(
 
     override fun onPageMedia(tabId: String, urls: List<String>) {
         urls.forEach { onResourceRequest(tabId, it, null) }
+    }
+
+    override fun onPageSource(tabId: String, html: String) {
+        if (!settings.value.detectionEnabled) return
+        viewModelScope.launch(Dispatchers.Default) {
+            PageSourceScanner.findManifestUrls(html).forEach { onResourceRequest(tabId, it, null) }
+        }
     }
 
     // ---- Internals ------------------------------------------------------------

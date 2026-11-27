@@ -37,6 +37,9 @@ interface BrowserEvents {
 
     /** Media element sources found by the in-page probe. */
     fun onPageMedia(tabId: String, urls: List<String>)
+
+    /** The page's HTML, scanned for stream links embedded in player configuration. */
+    fun onPageSource(tabId: String, html: String)
 }
 
 /**
@@ -88,6 +91,15 @@ class WebViewPool(private val context: Context) {
     fun scanForMedia(tabId: String, events: BrowserEvents) {
         val webView = views[tabId] ?: return
         webView.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
+        readPageSource(webView, tabId, events)
+    }
+
+    private fun readPageSource(webView: WebView, tabId: String, events: BrowserEvents) {
+        if (!webView.settings.javaScriptEnabled) return
+        webView.evaluateJavascript(PAGE_SOURCE_JS) { raw ->
+            val html = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull()
+            if (!html.isNullOrEmpty()) events.onPageSource(tabId, html)
+        }
     }
 
     /** Wipes cookies, site storage, caches and back/forward history for every tab. */
@@ -132,6 +144,7 @@ class WebViewPool(private val context: Context) {
                 if (view == null || url == null) return
                 events.onPageFinished(tabId, url, view.title.orEmpty())
                 events.onNavigationState(tabId, view.canGoBack(), view.canGoForward())
+                readPageSource(view, tabId, events)
                 if (view.settings.javaScriptEnabled && !liveProbeSupported) {
                     view.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
                 }
@@ -209,6 +222,10 @@ class WebViewPool(private val context: Context) {
 
     companion object {
         private const val PROBE_OBJECT = "UniversalMediaProbe"
+
+        /** Returns the page HTML (capped at 3 MB), including inline player configuration. */
+        private const val PAGE_SOURCE_JS =
+            "(function(){try{var h=document.documentElement.outerHTML;return h.length>3000000?h.slice(0,3000000):h;}catch(e){return '';}})();"
 
         private const val LIVE_PROBE_JS = """
             (function() {

@@ -4,6 +4,9 @@ import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
@@ -26,20 +28,19 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +57,7 @@ import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.core.model.formatBytes
 import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.Pill
+import app.universalmedia.media.detection.MediaGrouping
 import app.universalmedia.media.detection.UrlUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,7 +86,7 @@ internal fun BrowserSheets(
             )
             BrowserSheet.MEDIA -> MediaSheet(
                 media = state.activeTab.detected,
-                onDismissItem = { viewModel.dismissDetected(state.activeTabId, it) },
+                onDismissItem = { urls -> viewModel.dismissDetected(state.activeTabId, urls) },
                 onSave = onSave,
                 onPlay = onPlay,
             )
@@ -172,38 +174,77 @@ private fun TabsSheet(
 @Composable
 private fun MediaSheet(
     media: List<DetectedMedia>,
-    onDismissItem: (String) -> Unit,
+    onDismissItem: (Set<String>) -> Unit,
     onSave: (DetectedMedia, MediaVariant?) -> Unit,
     onPlay: (DetectedMedia, MediaVariant?) -> Unit,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val organized = remember(media) { MediaGrouping.organize(media) }
+    val videos = organized.filterNot(MediaGrouping::isAudio)
+    val audio = organized.filter(MediaGrouping::isAudio)
+
     SheetTitle("Media on this page")
     Text(
-        "Pick a quality and tap Save. Downloads keep going in the background and land in your library.",
+        listOfNotNull(
+            videos.size.takeIf { it > 0 }?.let { if (it == 1) "1 video" else "$it videos" },
+            audio.size.takeIf { it > 0 }?.let { if (it == 1) "1 audio track" else "$it audio tracks" },
+        ).joinToString(" · ") + " · choose a quality, then Save or Play",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
     )
     LazyColumn(
         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        items(media, key = { it.id }) { item ->
-            MediaCard(
-                item = item,
-                onCopy = { url ->
-                    clipboard.setText(AnnotatedString(url))
-                    Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
-                },
-                onPlay = { variant -> onPlay(item, variant) },
-                onSave = { variant -> onSave(item, variant) },
-                onDismiss = { onDismissItem(item.id) },
-            )
+        fun section(title: String, list: List<DetectedMedia>) {
+            if (list.isEmpty()) return
+            item(key = "h-$title") {
+                Text(
+                    title.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp, top = 4.dp),
+                )
+            }
+            items(list, key = { it.id + it.mediaUrl }) { item ->
+                MediaCard(
+                    item = item,
+                    onCopy = { url ->
+                        clipboard.setText(AnnotatedString(url))
+                        Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
+                    },
+                    onPlay = { variant -> onPlay(item, variant) },
+                    onSave = { variant -> onSave(item, variant) },
+                    onDismiss = { onDismissItem(MediaGrouping.urlsOf(item)) },
+                )
+            }
         }
+        section("Videos", videos)
+        section("Audio", audio)
     }
 }
 
+/** "1080p60", "720p", "Audio · 128 kbps", or "Original" when the source doesn't say. */
+private fun qualityLabel(v: MediaVariant): String = when {
+    v.audioOnly -> "Audio" + (v.bitrate?.let { " · ${it / 1000} kbps" } ?: "")
+    v.height != null -> "${v.height}p" + (v.frameRate?.takeIf { it >= 49 }?.let { it.toInt().toString() } ?: "")
+    else -> "Original"
+}
+
+private fun qualityBadge(item: DetectedMedia): String {
+    val best = item.variants.firstOrNull()
+    val height = best?.height
+    return when {
+        MediaGrouping.isAudio(item) -> "AUDIO"
+        height == null -> item.format.displayName.substringBefore(' ').uppercase()
+        height >= 2160 -> "4K"
+        else -> "${height}p"
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MediaCard(
     item: DetectedMedia,
@@ -212,7 +253,7 @@ private fun MediaCard(
     onSave: (MediaVariant?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var selected by remember(item.id) { mutableIntStateOf(0) }
+    var selected by remember(item.id, item.variants.size) { mutableIntStateOf(0) }
     val variants = item.variants.take(MAX_VARIANTS_SHOWN)
     val chosen = variants.getOrNull(selected)
     val chosenUrl = chosen?.url ?: item.mediaUrl
@@ -222,97 +263,118 @@ private fun MediaCard(
         Availability.PROTECTED, Availability.INACCESSIBLE -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.tertiary
     }
+
     Column(
         Modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 8.dp),
+            .padding(start = 14.dp, end = 4.dp, top = 12.dp, bottom = 8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Pill(item.format.displayName, MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(6.dp))
-            Pill(item.availability.label, availabilityColor)
-            if (item.origin == DetectionOrigin.SHARE_INTENT) {
-                Spacer(Modifier.width(6.dp))
-                Pill("Shared", MaterialTheme.colorScheme.tertiary)
+        // Header: best quality badge, title, source.
+        Row(verticalAlignment = Alignment.Top) {
+            Box(
+                Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    qualityBadge(item),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    item.title ?: UrlUtils.fileNameOf(item.mediaUrl) ?: "Untitled media",
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val meta = listOfNotNull(
+                    item.sourceHost,
+                    item.durationMs?.let(::formatDuration),
+                    item.format.displayName,
+                ).joinToString(" · ")
+                Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.padding(top = 4.dp)) {
+                    Pill(item.availability.label, availabilityColor)
+                    if (item.origin == DetectionOrigin.SHARE_INTENT) {
+                        Spacer(Modifier.width(6.dp))
+                        Pill("Shared", MaterialTheme.colorScheme.tertiary)
+                    }
+                }
+            }
             IconButton(onClick = onDismiss) {
                 Icon(Icons.Rounded.Close, contentDescription = "Hide", modifier = Modifier.size(18.dp))
             }
         }
-        Text(
-            item.title ?: UrlUtils.fileNameOf(item.mediaUrl) ?: "Untitled media",
-            style = MaterialTheme.typography.titleSmall,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(end = 12.dp),
-        )
-        val meta = listOfNotNull(
-            item.sourceHost,
-            item.durationMs?.let(::formatDuration),
-            if (variants.size <= 1) chosen?.estimatedBytes?.let { formatBytes(it) } else null,
-        ).joinToString(" · ")
-        if (meta.isNotEmpty()) {
-            Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+
         item.note?.let {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Text(it, style = MaterialTheme.typography.bodySmall, color = availabilityColor, modifier = Modifier.padding(end = 12.dp))
         }
-        if (saveBlocker != null && item.note == null) {
-            Spacer(Modifier.height(4.dp))
-            Text(saveBlocker, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (variants.size > 1) {
-            Spacer(Modifier.height(6.dp))
+
+        // Quality picker, best first, with sizes when known.
+        if (variants.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
             Text("Quality", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-            variants.forEachIndexed { index, v ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(end = 12.dp)
-                        .clip(MaterialTheme.shapes.small)
-                        .selectable(selected = index == selected, role = Role.RadioButton, onClick = { selected = index })
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = index == selected, onClick = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        v.label + if (v.format != item.format) " · ${v.format.displayName}" else "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
+            Spacer(Modifier.height(4.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(end = 10.dp),
+            ) {
+                variants.forEachIndexed { index, v ->
+                    FilterChip(
+                        selected = index == selected,
+                        onClick = { selected = index },
+                        label = {
+                            Column(Modifier.padding(vertical = 4.dp)) {
+                                Text(qualityLabel(v), style = MaterialTheme.typography.labelLarge)
+                                v.estimatedBytes?.let {
+                                    Text(
+                                        "≈ ${formatBytes(it)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        },
                     )
-                    v.estimatedBytes?.let {
-                        Text(
-                            "≈ ${formatBytes(it)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+
+        if (saveBlocker != null && item.note == null) {
+            Text(saveBlocker, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        // Actions.
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
             FilledTonalButton(onClick = { onSave(chosen) }, enabled = saveBlocker == null) {
                 Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Save")
+                Text(
+                    buildString {
+                        append("Save")
+                        chosen?.let { v -> if (v.height != null || v.audioOnly) append(" ").append(qualityLabel(v).substringBefore(" ·")) }
+                    },
+                )
             }
             Spacer(Modifier.width(4.dp))
-            TextButton(onClick = { onCopy(chosenUrl) }) {
-                Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Copy link")
-            }
             if (item.availability == Availability.SUPPORTED) {
                 TextButton(onClick = { onPlay(chosen) }) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Play")
                 }
+            }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { onCopy(chosenUrl) }) {
+                Icon(Icons.Rounded.ContentCopy, contentDescription = "Copy link", modifier = Modifier.size(18.dp))
             }
         }
     }

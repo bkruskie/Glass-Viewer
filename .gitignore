@@ -9,3 +9,7 @@ build/
 .cxx
 *.keystore
 *.jks
+
+# Test-build signing key (public on purpose: lets each test build install over the last).
+# Real releases must use a private key stored in CI secrets.
+!app/testing.keystore

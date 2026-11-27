@@ -12,9 +12,20 @@ android {
         applicationId = "app.universalmedia"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // Fixed key for test builds so each new APK installs over the previous one.
+        // Not secret; release builds will use a private key from CI secrets (Milestone 8).
+        create("testing") {
+            storeFile = file("testing.keystore")
+            storePassword = "universalmedia"
+            keyAlias = "testing"
+            keyPassword = "universalmedia"
+        }
     }
 
     buildTypes {
@@ -24,6 +35,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {
+            signingConfig = signingConfigs.getByName("testing")
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
