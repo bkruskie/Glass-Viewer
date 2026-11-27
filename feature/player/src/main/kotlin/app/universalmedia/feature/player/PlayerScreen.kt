@@ -38,6 +38,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayCircle
@@ -204,7 +206,7 @@ fun PlayerScreen(
                 queue?.let { q ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = playback::previous) {
-                            Icon(androidx.compose.material.icons.Icons.Rounded.SkipPrevious, contentDescription = "Previous")
+                            Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous")
                         }
                         Text(
                             "${q.name} · ${q.index + 1} of ${q.items.size}",
@@ -215,7 +217,7 @@ fun PlayerScreen(
                             modifier = Modifier.weight(1f),
                         )
                         IconButton(onClick = playback::next, enabled = q.hasNext) {
-                            Icon(androidx.compose.material.icons.Icons.Rounded.SkipNext, contentDescription = "Next")
+                            Icon(Icons.Rounded.SkipNext, contentDescription = "Next")
                         }
                     }
                 }
