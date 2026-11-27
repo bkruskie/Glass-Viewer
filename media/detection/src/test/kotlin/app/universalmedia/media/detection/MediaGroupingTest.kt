@@ -102,3 +102,39 @@ class ManifestLinkTest {
         assertEquals("https://cdn.example/720P_2000K/master.m3u8", organized.single().variants.single().manifestUrl)
     }
 }
+
+class HlsAudioMatchTest {
+    private val master = """
+        #EXTM3U
+        #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES,URI="a/en.m3u8?token=1"
+        #EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,CODECS="avc1.640028"
+        v/1080.m3u8?token=1
+        #EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2"
+        v/720.m3u8?token=1
+    """.trimIndent()
+
+    @Test
+    fun matchesQualityWhenTokensChangeAndFindsUnlinkedAudio() {
+        val p = HlsPlaylistParser.parse(master, "https://cdn.example/s/master.m3u8") as HlsPlaylist.Master
+        // Old link with an expired token still finds 1080p by path…
+        val hd = p.match("https://cdn.example/s/v/1080.m3u8?token=OLD", 1080, 5_000_000)!!
+        assertEquals("https://cdn.example/s/v/1080.m3u8?token=1", hd.url)
+        // …whose codecs show no sound, so the stream's default separate audio is used.
+        assertEquals("https://cdn.example/s/a/en.m3u8?token=1", p.audioFor(hd))
+        // 720p carries its own sound.
+        assertNull(p.audioFor(p.match(null, 720, null)!!))
+    }
+
+    @Test
+    fun mutedGroupDefaultWithoutUriMeansAudioIsMuxed() {
+        val text = """
+            #EXTM3U
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="g",NAME="Main",DEFAULT=YES
+            #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="g",NAME="Commentary",URI="c.m3u8"
+            #EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=640x360,AUDIO="g"
+            v.m3u8
+        """.trimIndent()
+        val p = HlsPlaylistParser.parse(text, "https://e.com/m.m3u8") as HlsPlaylist.Master
+        assertNull(p.audioFor(p.variants.single()))
+    }
+}

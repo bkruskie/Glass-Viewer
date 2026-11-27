@@ -25,10 +25,54 @@ sealed interface HlsPlaylist {
         val audioGroups: Map<String, String> = emptyMap(),
     ) : HlsPlaylist {
         /** The separate audio playlist that goes with [variantUrl], if the stream has one. */
-        fun audioFor(variantUrl: String): String? {
-            val group = audioGroups[variantUrl] ?: return null
-            val candidates = renditions.filter { it.type == "AUDIO" && it.groupId == group && it.uri != null }
-            return (candidates.firstOrNull { it.isDefault } ?: candidates.firstOrNull())?.uri
+        fun audioFor(variantUrl: String): String? =
+            variants.firstOrNull { it.url == variantUrl }?.let { audioFor(it) }
+
+        /**
+         * The separate audio playlist for [variant]: its AUDIO group's default track, or,
+         * when the stream doesn't link them but the variant's codecs show it carries no
+         * sound, the stream's default separate audio. Null when the sound is inside the video.
+         */
+        fun audioFor(variant: MediaVariant): String? {
+            if (variant.audioOnly) return null
+            val audio = renditions.filter { it.type == "AUDIO" }
+            val group = audioGroups[variant.url]
+            if (group != null) {
+                val inGroup = audio.filter { it.groupId == group }
+                val default = inGroup.firstOrNull { it.isDefault } ?: inGroup.firstOrNull()
+                if (default != null && default.uri == null) return null // muxed into the video
+                val withUri = inGroup.filter { it.uri != null }
+                (withUri.firstOrNull { it.isDefault } ?: withUri.firstOrNull())?.let { return it.uri }
+            }
+            val codecs = variant.codecs?.lowercase() ?: return null
+            val hasAudioCodec = AUDIO_CODECS.any { codecs.contains(it) }
+            if (hasAudioCodec) return null
+            val separate = audio.filter { it.uri != null }
+            return (separate.firstOrNull { it.isDefault } ?: separate.firstOrNull())?.uri
+        }
+
+        /**
+         * Finds the variant matching a previously chosen one. Links often carry expiring
+         * tokens, so match by URL, then by path, then by resolution and bitrate.
+         */
+        fun match(url: String?, height: Int?, bitrate: Long?): MediaVariant? {
+            val video = variants.filter { !it.audioOnly }.ifEmpty { variants }
+            if (url != null) {
+                video.firstOrNull { it.url == url }?.let { return it }
+                val path = url.substringBefore('?')
+                video.firstOrNull { it.url.substringBefore('?') == path }?.let { return it }
+            }
+            if (height == null && bitrate == null) return video.firstOrNull()
+            return video.minWithOrNull(
+                compareBy<MediaVariant>(
+                    { kotlin.math.abs((it.height ?: 0) - (height ?: it.height ?: 0)) },
+                    { kotlin.math.abs((it.bitrate ?: 0) - (bitrate ?: it.bitrate ?: 0)) },
+                ),
+            )
+        }
+
+        private companion object {
+            val AUDIO_CODECS = listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "mp3", "dts")
         }
     }
 

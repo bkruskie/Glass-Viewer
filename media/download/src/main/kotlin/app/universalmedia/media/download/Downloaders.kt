@@ -149,7 +149,7 @@ internal class HlsDownloader(private val http: Http) {
             pieces = segments.map { Piece(it.url, it.byteRange?.rangeHeader) },
             part = part,
             resumeState = resumeState,
-            transform = { index, bytes -> decrypt(segments[index], bytes, keys) },
+            transform = { index, bytes -> stripId3(decrypt(segments[index], bytes, keys)) },
             onProgress = onProgress,
         )
         return Output(file, list.isFragmentedMp4)
@@ -181,17 +181,39 @@ internal class HlsDownloader(private val http: Http) {
     }
 }
 
-/** Finds the video playlist and, if the stream carries audio separately, the audio playlist. */
-internal suspend fun resolveHlsTracks(http: Http, url: String, masterUrl: String): Pair<String, String?> {
-    val (text, finalUrl) = retrying { http.text(url) }
-    val parsed = HlsPlaylistParser.parse(text, finalUrl)
-    if (parsed is HlsPlaylist.Master) {
-        val best = parsed.variants.firstOrNull { !it.audioOnly } ?: parsed.variants.firstOrNull()
+/**
+ * Finds the video playlist to download and, if the stream carries sound separately,
+ * the audio playlist. Re-reads the master so links with expiring tokens are fresh,
+ * and matches the chosen quality by resolution and bitrate.
+ */
+internal suspend fun resolveHlsTracks(
+    http: Http,
+    url: String,
+    masterUrl: String,
+    targetHeight: Int?,
+    targetBitrate: Long?,
+): Pair<String, String?> {
+    suspend fun master(link: String): HlsPlaylist.Master? = runCatching {
+        val (text, finalUrl) = retrying { http.text(link) }
+        HlsPlaylistParser.parse(text, finalUrl) as? HlsPlaylist.Master
+    }.getOrNull()
+
+    val fromMaster = (if (masterUrl != url) master(masterUrl) else null) ?: master(url)
+    if (fromMaster != null) {
+        val chosenUrl = if (url == masterUrl) null else url
+        val variant = fromMaster.match(chosenUrl, targetHeight, targetBitrate)
             ?: throw DownloadException("The stream lists no qualities.")
-        return best.url to parsed.audioFor(best.url)
+        return variant.url to fromMaster.audioFor(variant)
     }
-    if (masterUrl == url) return url to null
-    val master = runCatching { retrying { http.text(masterUrl) } }.getOrNull()
-        ?.let { (t, u) -> HlsPlaylistParser.parse(t, u) as? HlsPlaylist.Master }
-    return url to master?.audioFor(url)
+    return url to null
+}
+
+/** Packed-audio HLS segments start with an ID3 tag; drop it so the segments join into one clean stream. */
+internal fun stripId3(bytes: ByteArray): ByteArray {
+    if (bytes.size < 10 || bytes[0] != 'I'.code.toByte() || bytes[1] != 'D'.code.toByte() || bytes[2] != '3'.code.toByte()) return bytes
+    val size = ((bytes[6].toInt() and 0x7F) shl 21) or ((bytes[7].toInt() and 0x7F) shl 14) or
+        ((bytes[8].toInt() and 0x7F) shl 7) or (bytes[9].toInt() and 0x7F)
+    val footer = if ((bytes[5].toInt() and 0x10) != 0) 10 else 0
+    val skip = 10 + size + footer
+    return if (skip in 1 until bytes.size) bytes.copyOfRange(skip, bytes.size) else bytes
 }

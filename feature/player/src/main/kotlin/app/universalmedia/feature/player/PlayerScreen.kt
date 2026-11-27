@@ -1,6 +1,13 @@
 package app.universalmedia.feature.player
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.view.ViewGroup
+import android.widget.Toast
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -73,6 +80,8 @@ fun PlayerScreen(
     onOpenLibrary: () -> Unit,
 ) {
     val current by playback.current.collectAsStateWithLifecycle()
+    val problem by playback.problem.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val recent by remember(mediaItemDao) { mediaItemDao.observeRecentlyPlayed(20) }
         .collectAsStateWithLifecycle(emptyList())
 
@@ -154,6 +163,15 @@ fun PlayerScreen(
                     )
                     IconButton(onClick = playback::stop) { Icon(Icons.Rounded.Close, contentDescription = "Close player") }
                 }
+                problem?.let { message ->
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        Row {
+                            TextButton(onClick = playback::retry) { Text("Retry") }
+                            TextButton(onClick = { openElsewhere(context, playing) }) { Text("Open in another app") }
+                        }
+                    }
+                }
             }
             if (recent.isNotEmpty()) {
                 LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -206,6 +224,17 @@ private fun VideoSurface(
             onRelease = { view -> view.player = null },
             modifier = Modifier.fillMaxSize(),
         )
+    }
+}
+
+private fun openElsewhere(context: Context, request: PlayRequest) {
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(Uri.parse(request.uri), request.mimeType ?: "video/*")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(intent, request.title))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No other app can open this", Toast.LENGTH_SHORT).show()
     }
 }
 

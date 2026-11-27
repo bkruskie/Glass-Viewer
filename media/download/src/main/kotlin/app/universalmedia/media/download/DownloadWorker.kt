@@ -107,7 +107,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val extension: String
         when (format) {
             MediaFormat.HLS -> {
-                val (videoUrl, audioUrl) = if (job.audioOnly) url to null else resolveHlsTracks(http, url, job.mediaUrl)
+                val (videoUrl, audioUrl) = if (job.audioOnly) url to null else resolveHlsTracks(http, url, job.mediaUrl, job.targetHeight, job.targetBitrate)
                 if (audioUrl == null) {
                     val part = File(dir, "${job.id}.hls")
                     val out = HlsDownloader(http).download(videoUrl, part, resumeInner, progressFor(0))
@@ -187,6 +187,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             }
         }
 
+        val silent = !mime.startsWith("audio/") && !job.audioOnly && TrackMuxer.hasNoAudio(finished)
         val isAudio = mime.startsWith("audio/") || job.audioOnly
         val fileName = job.fileName.substringBeforeLast('.') + "." + extension
         val size = finished.length()
@@ -198,6 +199,12 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val thumbnail = runCatching { Thumbnails.create(ctx, uri, job.id, isAudio) }.getOrNull()
         env.dao.markCompleted(job.id, uri.toString(), fileName, mime, size, now)
         env.dao.setThumbnail(job.id, thumbnail)
+        if (silent) {
+            env.dao.setStatus(
+                job.id, DownloadStatus.COMPLETED.name,
+                "Saved without sound: this site sends sound separately and it couldn't be found.", now,
+            )
+        }
         env.mediaItemDao.insertAll(
             listOf(
                 MediaItemEntity(

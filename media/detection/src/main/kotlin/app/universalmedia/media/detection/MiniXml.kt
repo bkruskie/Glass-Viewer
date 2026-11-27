@@ -11,7 +11,7 @@ class XmlElement(val name: String, val attributes: Map<String, String>) {
     operator fun get(attribute: String): String? = attributes[attribute]
 }
 
-internal object MiniXml {
+object MiniXml {
     private val attr = Regex("([A-Za-z_:][-A-Za-z0-9_:.]*)\\s*=\\s*(\"([^\"]*)\"|'([^']*)')")
 
     /** Parses [xml] into a tree and returns the root element, or null if malformed. */

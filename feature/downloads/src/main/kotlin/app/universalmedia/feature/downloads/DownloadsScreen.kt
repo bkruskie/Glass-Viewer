@@ -207,12 +207,12 @@ private fun DownloadRow(
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(end = 8.dp))
                 }
             }
-            item.errorMessage?.takeIf { status == DownloadStatus.FAILED || status == DownloadStatus.QUEUED }?.let {
+            item.errorMessage?.takeIf { status == DownloadStatus.FAILED || status == DownloadStatus.QUEUED || status == DownloadStatus.COMPLETED }?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (status == DownloadStatus.QUEUED) "Retrying: $it" else it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (status == DownloadStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+                    color = if (status == DownloadStatus.QUEUED) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error,
                 )
             }
         }

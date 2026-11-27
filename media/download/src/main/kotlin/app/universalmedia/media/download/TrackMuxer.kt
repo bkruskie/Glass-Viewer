@@ -20,6 +20,20 @@ internal object TrackMuxer {
 
     private class Source(val extractor: MediaExtractor, val trackMap: MutableMap<Int, Int> = mutableMapOf())
 
+    /** True when [file] has a video track but no audio track. */
+    fun hasNoAudio(file: File): Boolean {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(file.absolutePath)
+            val mimes = (0 until ex.trackCount).map { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME).orEmpty() }
+            mimes.any { it.startsWith("video/") } && mimes.none { it.startsWith("audio/") }
+        } catch (e: Exception) {
+            false
+        } finally {
+            runCatching { ex.release() }
+        }
+    }
+
     fun mux(inputs: List<File>, outDir: File, baseName: String): Output {
         val sources = inputs.map { file -> Source(MediaExtractor().apply { setDataSource(file.absolutePath) }) }
         var muxer: MediaMuxer? = null
