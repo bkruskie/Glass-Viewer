@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.StopScreenShare
@@ -93,6 +94,12 @@ internal fun MirrorSection(discovery: ReceiverDiscovery) {
                 )
             }
             FeatureCard(
+                Icons.Rounded.Cast, "Use Smart View / Screen cast",
+                "Your phone's built-in mirroring, with sound. Works with most Samsung, LG, Roku and other TVs.",
+                tint = MaterialTheme.colorScheme.tertiary,
+                onClick = { openSystemMirroring(context) },
+            )
+            FeatureCard(
                 Icons.Rounded.Language, "Any TV with a web browser",
                 "Nothing to install. Shows an address to open on the TV.",
                 tint = MaterialTheme.colorScheme.secondary,
@@ -112,6 +119,34 @@ internal fun MirrorSection(discovery: ReceiverDiscovery) {
             }) { Text("Copy receiver app link") }
         }
     }
+}
+
+/**
+ * Opens the phone's own screen mirroring (Samsung Smart View, or Android's Cast screen),
+ * which can use the TV's built-in "Screen mirroring" input. Apps aren't allowed to use it directly.
+ */
+private fun openSystemMirroring(context: android.content.Context) {
+    val pm = context.packageManager
+    val candidates = listOfNotNull(
+        pm.getLaunchIntentForPackage("com.samsung.android.smartmirroring"),
+        android.content.Intent(android.provider.Settings.ACTION_CAST_SETTINGS),
+        android.content.Intent("android.settings.WIFI_DISPLAY_SETTINGS"),
+    )
+    for (intent in candidates) {
+        try {
+            context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (e: android.content.ActivityNotFoundException) {
+            // try the next option
+        } catch (e: SecurityException) {
+            // try the next option
+        }
+    }
+    Toast.makeText(
+        context,
+        "Swipe down from the top and tap Smart View (or Screen cast) in quick settings.",
+        Toast.LENGTH_LONG,
+    ).show()
 }
 
 @Composable
