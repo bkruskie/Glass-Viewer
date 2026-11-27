@@ -13,6 +13,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- Lets the Connect tab open Samsung's Smart View directly (Android 11+ package visibility). -->
+    <queries>
+        <package android:name="com.samsung.android.smartmirroring" />
+    </queries>
+
     <application
         android:name=".UniversalMediaApp"
         android:allowBackup="false"
