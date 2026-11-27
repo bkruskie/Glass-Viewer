@@ -1,6 +1,6 @@
 # Universal Media: Architecture & Technical Plan
 
-Status: Milestone 1 (Foundation) implemented. Version `0.1.0-m1`.
+Status: Milestones 1 (Foundation) and 2 (Media detection) implemented. Version `0.2.0-m2`.
 
 This document covers the full architecture for every planned subsystem, the feasibility limits Android sets, and the plan for each milestone. Decisions are recorded as ADRs at the end.
 
@@ -28,9 +28,10 @@ UniversalMedia/
 │   ├── model/                 [pure Kotlin] domain models: DetectedMedia, MediaFormat, Protection, AppSettings...
 │   ├── ui/                    theme (dark "glass" palette), shared Compose components
 │   ├── database/              Room database, entities, DAOs, exported schemas
-│   └── datastore/             SettingsRepository (Preferences DataStore)
+│   ├── datastore/             SettingsRepository (Preferences DataStore)
+│   └── network/               [pure Kotlin] OkHttp ManifestFetcher (browser UA, cookies, referer)   ✅ M2
 ├── media/
-│   ├── detection/             [pure Kotlin] classifier, HLS/DASH inspection, adapter registry   ← M1/M2
+│   ├── detection/             [pure Kotlin] classifier, HLS/DASH inspection, adapters (Internet Archive, PeerTube)   ✅ M1/M2
 │   ├── download/              download engine, segment fetcher, remuxer                          ← M3
 │   ├── playback/              Media3 player wrapper, session service                             ← M4
 │   ├── server/                local HTTP media server (Range support) shared by cast/transfer   ← M5
@@ -270,9 +271,9 @@ Android gives no app access to another app's network traffic, decoded video buff
 | Method | Works across apps? | Gets an actual media source? | Verdict |
 |---|---|---|---|
 | In-app browser request observation | Inside our browser | Yes, direct files and manifests | ✅ Implemented (M1) |
-| Share intent (`ACTION_SEND`) | Any app with a Share button | Gets the page link; the engine then resolves it | ✅ Implemented (M1); M2 adds instant analysis + originating app via `getReferrer()` |
+| Share intent (`ACTION_SEND`) | Any app with a Share button | Gets the page link; the engine then resolves it | ✅ Implemented (M1); instant analysis added in M2 |
 | "Open with" for web links (`ACTION_VIEW`) | Any app that opens links | Same as share | ✅ Implemented (M1) |
-| Clipboard check on app open | When our app is in the foreground (Android 10+ blocks background reads) | Link only | ✅ M2: "Analyse copied link?" chip |
+| Clipboard check on app open | When our app is in the foreground (Android 10+ blocks background reads) | Link only | ✅ M2: "Open copied link" chip |
 | Firefox for Android extension | Firefox only (Chrome for Android has no extensions) | Yes, via the add-on's request observation | 🔶 M7: companion add-on sends a `universalmedia://` deep link |
 | MediaSession (via Notification access) | Apps that publish a media session (most players) | No URL: title, artist, duration, package name only | 🔶 Optional, opt-in: "You're watching *X* in App Y" with a suggestion to share the link. Cannot download by itself |
 | Accessibility service reading browser address bars | Technically yes | Page URL only | ⛔ Not shipped: privacy-invasive and against Google Play's Accessibility API policy. May be reconsidered only as an opt-in in sideloaded builds |
@@ -349,7 +350,7 @@ Discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-dig
 
 | Layer | Tool | Scope |
 |---|---|---|
-| Pure logic (JVM) | JUnit 4 | URL classification, HLS/DASH parsing, URL resolution, engine routing, availability policy, address-bar resolution. **15 detection tests + 4 browser tests exist today** |
+| Pure logic (JVM) | JUnit 4 | URL classification, HLS/DASH parsing, URL resolution, engine routing, availability policy, site adapters, JSON reader, address-bar resolution. **24 detection tests, 3 network (MockWebServer) tests and 4 browser tests exist today** |
 | Manifest corpus | JUnit + fixture files | Real-world playlists (multi-audio, I-frame, CMAF, live, encrypted) added as regressions |
 | Database | androidx.test + in-memory Room | DAO behaviour (3 tests exist); `MigrationTestHelper` for each schema bump |
 | ViewModels | JUnit + fake DAOs + `kotlinx-coroutines-test` | Tab lifecycle, history merging, detection de-duplication (M2) |
@@ -365,23 +366,34 @@ Discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-dig
 | # | Milestone | Status | Exit criteria |
 |---|---|---|---|
 | 1 | Foundation | ✅ Done | Multi-module build, theme, navigation, settings, database, browser with tabs/history/bookmarks, share intent, library import, detection engine core with tests |
-| 2 | Media detection | Next | OkHttp `ManifestFetcher` with page cookies; quality lists for HLS/DASH; AUTH_REQUIRED handling; clipboard chip; share flow shows a detection card immediately; MutationObserver probe for late players; first site adapters for open platforms (e.g. Vimeo, Internet Archive, PeerTube) |
-| 3 | Download engine | | WorkManager + foreground service; progressive with Range resume; HLS/DASH segment download → Media3 remux to MP4; queue, pause/resume/retry, Wi-Fi-only, concurrency limit; SAF destination; duplicate detection; auto-add to library |
+| 2 | Media detection | ✅ Done | OkHttp `ManifestFetcher` with page cookies; quality lists for HLS/DASH; AUTH_REQUIRED handling; clipboard chip; share flow shows a detection card immediately; MutationObserver probe for late players; first site adapters for open platforms (e.g. Vimeo, Internet Archive, PeerTube) |
+| 3 | Download engine | Next | WorkManager + foreground service; progressive with Range resume; HLS/DASH segment download → Media3 remux to MP4; queue, pause/resume/retry, Wi-Fi-only, concurrency limit; SAF destination; duplicate detection; auto-add to library |
 | 4 | Media player | | Media3 player: local + online, subtitles, audio tracks, speed, gestures, PiP, background audio via `MediaSessionService`, resume position |
 | 5 | Casting | | Local server; Google Cast (`full` flavor); DLNA discovery + control; web receiver; remote controls in a notification |
 | 6 | Screen mirroring | | Companion receiver app (Android TV/Fire TV); browser receiver; adaptive bitrate; connection quality |
 | 7 | Ecosystem | | LAN transfer with pairing; browser upload page for computers; Firefox add-on; more adapters; playlists UI |
 | 8 | Release | | R8 enabled and verified; security review; performance; accessibility pass; F-Droid metadata; signed releases on GitHub |
 
-### Milestone 2 task list
+### Milestone 2: delivered
 
-1. `media:net`: OkHttp client, `OkHttpManifestFetcher` (cookies from `CookieManager`, referer = page URL, 5 MB cap, 10 s timeout).
-2. Wire the fetcher into `AppContainer`; handle 401/403 → `Availability.AUTH_REQUIRED`.
-3. Media sheet: quality picker from `variants`, size estimate (bitrate × duration).
-4. Share flow: analyse the shared URL directly; if it is a page, open it in a tab and show results as they arrive.
-5. In-page probe upgrade: `MutationObserver` + `play` event listener via `WebViewCompat.addDocumentStartJavaScript`.
-6. Clipboard chip on the start page when a link was copied.
-7. Adapter framework docs + first adapters; manifest fixture corpus; MockWebServer browser tests.
+1. `core:network`: `OkHttpManifestFetcher` with the WebView's user agent and cookies, page as Referer, redirects followed (relative manifest entries resolve against the final URL), 5 MB cap, HEAD probe for file sizes. MockWebServer tests.
+2. HTTP 401/403 → `AUTH_REQUIRED` with a "sign in on the site, then retry" note; 404/410 and others → `INACCESSIBLE`.
+3. HLS masters: qualities, plus one extra request to the best media playlist for duration and protection; DASH: qualities and duration. Sizes estimated as bitrate × duration. Quality picker in the media sheet.
+4. Share / "open with" / copied links are analysed immediately (`openShared`); finds from a shared link survive redirects on the first page load.
+5. Live probe: a document-start script in every frame reports `<video>`/`<audio>` sources added later (debounced MutationObserver), `play`/`loadedmetadata` events, and manifests fetched by JavaScript players identified by Content-Type, through `WebMessageListener`. Messages are treated as untrusted hints.
+6. Clipboard: the start page offers "Open copied link" after checking only the clip description; the text is read only on tap.
+7. Page-level site adapters: Internet Archive (public metadata API; lending-library items reported, not fetched) and PeerTube on any instance (public REST API). Pages are resolved on navigation via `MediaDetectionEngine.resolvePage`.
+
+Deferred to later milestones: originating-app name for shares (needs package visibility), Firefox add-on (M7), MediaSession awareness (opt-in, M7).
+
+### Milestone 3 task list
+
+1. `media:download`: `DownloadEngine` + strategies (progressive with Range resume; HLS segments; DASH segments).
+2. WorkManager worker + foreground service with a progress notification (`POST_NOTIFICATIONS` prompt on Android 13+).
+3. Segment downloads concatenated and remuxed to MP4 with Media3 Transformer (no re-encode). AES-128 HLS uses the key URI with the same session headers.
+4. Queue with concurrency limit and Wi-Fi-only constraint from settings; pause, resume, retry, cancel.
+5. Storage: default `Movies/Universal Media` via MediaStore, or a user-picked SAF folder; duplicate detection by media URL.
+6. Completed files added to the library automatically; Save button enabled in the media sheet with the selected quality.
 
 ---
 
@@ -401,8 +413,7 @@ Discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-dig
 ## 19. Known limitations (current)
 
 - Downloading is not available yet (M3); the media sheet offers Copy link and Open in another app.
-- HLS/DASH quality lists need the M2 fetcher; until then streams show as a single entry.
-- Players that hide media behind `blob:` URLs and fetch manifests through unusual endpoints (no `.m3u8`/`.mpd` extension and no MIME type visible to request observation) are not detected yet; site adapters address these case by case.
+- Players that fetch manifests with obfuscated or encrypted responses, or build them in JavaScript, are not detected; site adapters address these case by case where the site's terms allow it.
 - The project was written without access to the Android SDK in the authoring environment. The pure-Kotlin modules were compiled and their tests run; the Android modules are verified by the CI workflow on first push or by opening the project in Android Studio.
 
 ## 20. Distribution note

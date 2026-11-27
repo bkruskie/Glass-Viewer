@@ -2,13 +2,14 @@
 
 A free, private, all-in-one media app for Android: browse, detect, download, play, cast, mirror and transfer video and audio. No accounts, no ads, no cloud.
 
-**Current version:** `0.1.0-m1`, Milestone 1 (Foundation). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
+**Current version:** `0.2.0-m2`, Milestone 2 (Media detection). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
 
 ## What works in this build
 
 - **Browser** with tabs, address bar (search or URL), history, bookmarks, fullscreen video, Safe Browsing and third-party cookie blocking.
-- **Automatic media detection** in the browser: video, audio, HLS and DASH sources appear behind a "N media found" button, with DRM identified and explained.
-- **Share to Universal Media** from any app, or open web links with it.
+- **Automatic media detection** in the browser: video, audio, HLS and DASH sources appear behind a "N media found" button, including players that load late. Streams show their qualities, duration and estimated size; DRM and sign-in requirements are identified and explained.
+- **Site support** for Internet Archive and PeerTube (any instance) pages.
+- **Share to Universal Media** from any app, open web links with it, or tap "Open copied link". Shared links are analysed right away.
 - **Library**: add videos and music from your phone, search, filter, favourites. Files stay where they are.
 - **Settings**: detection, search engine, JavaScript, cookies, download preferences, pure-black theme, clear browsing data.
 - Downloads, Player and Connect screens are in place for the next milestones.
