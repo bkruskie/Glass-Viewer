@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Milestone 1 needs only network access. Later milestones add, each with a runtime prompt where required:
-         POST_NOTIFICATIONS (downloads), FOREGROUND_SERVICE_* (downloads, casting, mirroring),
-         ACCESS_WIFI_STATE / CHANGE_WIFI_MULTICAST_STATE (TV discovery), NEARBY_WIFI_DEVICES (transfer). -->
+    <!-- Later milestones add ACCESS_WIFI_STATE / CHANGE_WIFI_MULTICAST_STATE (TV discovery)
+         and NEARBY_WIFI_DEVICES (transfer). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Downloads (Milestone 3): progress notification and a data-sync foreground service.
+         No storage permission is needed: files go through MediaStore or a folder the user picks. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:name=".UniversalMediaApp"
@@ -45,5 +51,21 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+
+        <!-- WorkManager's foreground service, typed for Android 14+. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

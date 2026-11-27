@@ -34,6 +34,7 @@ class SettingsRepository(context: Context) {
         val wifiOnlyDownloads = booleanPreferencesKey("wifi_only_downloads")
         val maxConcurrentDownloads = intPreferencesKey("max_concurrent_downloads")
         val pureBlackTheme = booleanPreferencesKey("pure_black_theme")
+        val downloadTreeUri = stringPreferencesKey("download_tree_uri")
     }
 
     val settings: Flow<AppSettings> = store.data
@@ -61,6 +62,7 @@ class SettingsRepository(context: Context) {
             wifiOnlyDownloads = this[Keys.wifiOnlyDownloads] ?: d.wifiOnlyDownloads,
             maxConcurrentDownloads = (this[Keys.maxConcurrentDownloads] ?: d.maxConcurrentDownloads).coerceIn(1, 6),
             pureBlackTheme = this[Keys.pureBlackTheme] ?: d.pureBlackTheme,
+            downloadTreeUri = this[Keys.downloadTreeUri]?.ifBlank { null },
         )
     }
 
@@ -73,5 +75,6 @@ class SettingsRepository(context: Context) {
         this[Keys.wifiOnlyDownloads] = s.wifiOnlyDownloads
         this[Keys.maxConcurrentDownloads] = s.maxConcurrentDownloads.coerceIn(1, 6)
         this[Keys.pureBlackTheme] = s.pureBlackTheme
+        if (s.downloadTreeUri != null) this[Keys.downloadTreeUri] = s.downloadTreeUri else remove(Keys.downloadTreeUri)
     }
 }

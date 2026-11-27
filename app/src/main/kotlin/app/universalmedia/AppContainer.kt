@@ -11,6 +11,13 @@ import app.universalmedia.media.detection.ManifestFetcher
 import app.universalmedia.media.detection.MediaDetectionEngine
 import app.universalmedia.media.detection.adapters.InternetArchiveAdapter
 import app.universalmedia.media.detection.adapters.PeerTubeAdapter
+import app.universalmedia.media.download.DownloadEnvironment
+import app.universalmedia.media.download.DownloadEnvironmentProvider
+import app.universalmedia.media.download.MediaDownloadManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 /**
@@ -25,18 +32,35 @@ class AppContainer(private val application: Application) {
 
     val httpClient: OkHttpClient by lazy { OkHttpManifestFetcher.defaultClient() }
 
+    /** Process-wide scope for work that outlives screens. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private val browserUserAgent: String? by lazy {
         runCatching { WebSettings.getDefaultUserAgent(application) }.getOrNull()
     }
 
+    private val browserCookies: (String) -> String? = { url ->
+        runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull()
+    }
+
     /** Requests manifests like the in-app browser would: same UA, cookies and referer. */
     val manifestFetcher: ManifestFetcher by lazy {
-        OkHttpManifestFetcher(
+        OkHttpManifestFetcher(client = httpClient, userAgent = { browserUserAgent }, cookiesFor = browserCookies)
+    }
+
+    val downloadEnvironment: DownloadEnvironment by lazy {
+        DownloadEnvironment(
+            context = application,
+            dao = database.downloadDao(),
+            mediaItemDao = database.mediaItemDao(),
+            settings = settings,
             client = httpClient,
             userAgent = { browserUserAgent },
-            cookiesFor = { url -> runCatching { CookieManager.getInstance().getCookie(url) }.getOrNull() },
+            cookiesFor = browserCookies,
         )
     }
+
+    val downloads: MediaDownloadManager by lazy { MediaDownloadManager(downloadEnvironment) }
 
     /** Site adapters are registered here, most specific first. The generic adapter is always the fallback. */
     val detectionEngine: MediaDetectionEngine by lazy {
@@ -50,12 +74,16 @@ class AppContainer(private val application: Application) {
     }
 }
 
-class UniversalMediaApp : Application() {
+class UniversalMediaApp : Application(), DownloadEnvironmentProvider {
     lateinit var container: AppContainer
         private set
+
+    override val downloadEnvironment: DownloadEnvironment
+        get() = container.downloadEnvironment
 
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        container.appScope.launch { runCatching { container.downloads.restoreQueue() } }
     }
 }

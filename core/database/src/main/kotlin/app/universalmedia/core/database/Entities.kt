@@ -1,5 +1,6 @@
 package app.universalmedia.core.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -40,6 +41,13 @@ data class DownloadEntity(
     val errorMessage: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    // ---- v2 ----
+    /** URL actually fetched (the chosen quality); [mediaUrl] identifies the source for duplicate checks. */
+    val variantUrl: String? = null,
+    /** Strategy-specific resume point, e.g. "segment:bytes" for HLS. */
+    val resumeState: String? = null,
+    val mimeType: String? = null,
+    @ColumnInfo(defaultValue = "0") val audioOnly: Boolean = false,
 )
 
 /** Anything in the user's library: downloads and imported local files. */

@@ -1,5 +1,10 @@
 package app.universalmedia.feature.settings
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -37,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -59,6 +65,19 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     fun update(transform: (AppSettings) -> AppSettings) {
         scope.launch { repository.update(transform) }
+    }
+
+    val context = LocalContext.current
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            update { it.copy(downloadTreeUri = uri.toString()) }
+        }
     }
 
     var pickEngine by rememberSaveable { mutableStateOf(false) }
@@ -108,6 +127,21 @@ fun SettingsScreen(
             ClickRow("Clear browsing data", "Cookies, site data, cache and history") { confirmClear = true }
 
             SectionHeader("Downloads")
+            ClickRow(
+                "Save location",
+                settings.downloadTreeUri?.let(::folderLabel) ?: DEFAULT_FOLDER_LABEL,
+            ) { folderPicker.launch(null) }
+            settings.downloadTreeUri?.let { current ->
+                ClickRow("Use default location", DEFAULT_FOLDER_LABEL) {
+                    runCatching {
+                        context.contentResolver.releasePersistableUriPermission(
+                            Uri.parse(current),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                        )
+                    }
+                    update { it.copy(downloadTreeUri = null) }
+                }
+            }
             SwitchRow(
                 "Download on Wi-Fi only",
                 "Wait for Wi-Fi before starting downloads",
@@ -188,6 +222,13 @@ fun SettingsScreen(
         )
     }
 }
+
+private const val DEFAULT_FOLDER_LABEL = "Movies › Universal Media (music in Music › Universal Media)"
+
+/** "primary:Download/Videos" → "Download/Videos". */
+private fun folderLabel(treeUri: String): String = runCatching {
+    DocumentsContract.getTreeDocumentId(Uri.parse(treeUri)).substringAfter(':').ifBlank { "Internal storage" }
+}.getOrDefault("Chosen folder")
 
 @Composable
 private fun SwitchRow(

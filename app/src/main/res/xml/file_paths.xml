@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8–9 downloads live in the app's public Movies/Music folders and are shared via FileProvider. -->
+<paths>
+    <external-files-path name="movies" path="Movies/" />
+    <external-files-path name="music" path="Music/" />
+</paths>

@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.dp
 import app.universalmedia.core.model.Availability
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.DetectionOrigin
+import app.universalmedia.core.model.DownloadSupport
+import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.core.model.formatBytes
 import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.Pill
@@ -67,6 +69,7 @@ internal fun BrowserSheets(
     state: BrowserUiState,
     onDismiss: () -> Unit,
     viewModel: BrowserViewModel,
+    onSave: (DetectedMedia, MediaVariant?) -> Unit,
 ) {
     if (sheet == BrowserSheet.NONE) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = sheet == BrowserSheet.MEDIA)
@@ -85,6 +88,7 @@ internal fun BrowserSheets(
             BrowserSheet.MEDIA -> MediaSheet(
                 media = state.activeTab.detected,
                 onDismissItem = { viewModel.dismissDetected(state.activeTabId, it) },
+                onSave = onSave,
             )
             BrowserSheet.BOOKMARKS -> LinkListSheet(
                 title = "Bookmarks",
@@ -168,12 +172,16 @@ private fun TabsSheet(
 }
 
 @Composable
-private fun MediaSheet(media: List<DetectedMedia>, onDismissItem: (String) -> Unit) {
+private fun MediaSheet(
+    media: List<DetectedMedia>,
+    onDismissItem: (String) -> Unit,
+    onSave: (DetectedMedia, MediaVariant?) -> Unit,
+) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     SheetTitle("Media on this page")
     Text(
-        "Saving straight to your library arrives with the download engine. For now you can copy a link or open it in another app.",
+        "Pick a quality and tap Save. Downloads keep going in the background and land in your library.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
@@ -190,6 +198,7 @@ private fun MediaSheet(media: List<DetectedMedia>, onDismissItem: (String) -> Un
                     Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
                 },
                 onOpenWith = { url -> openWith(context, item, url) },
+                onSave = { variant -> onSave(item, variant) },
                 onDismiss = { onDismissItem(item.id) },
             )
         }
@@ -201,12 +210,14 @@ private fun MediaCard(
     item: DetectedMedia,
     onCopy: (String) -> Unit,
     onOpenWith: (String) -> Unit,
+    onSave: (MediaVariant?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var selected by remember(item.id) { mutableIntStateOf(0) }
     val variants = item.variants.take(MAX_VARIANTS_SHOWN)
     val chosen = variants.getOrNull(selected)
     val chosenUrl = chosen?.url ?: item.mediaUrl
+    val saveBlocker = DownloadSupport.reasonNotSupported(item, chosen)
     val availabilityColor = when (item.availability) {
         Availability.SUPPORTED -> MaterialTheme.colorScheme.secondary
         Availability.PROTECTED, Availability.INACCESSIBLE -> MaterialTheme.colorScheme.error
@@ -251,6 +262,10 @@ private fun MediaCard(
             Spacer(Modifier.height(4.dp))
             Text(it, style = MaterialTheme.typography.bodySmall, color = availabilityColor, modifier = Modifier.padding(end = 12.dp))
         }
+        if (saveBlocker != null && item.note == null) {
+            Spacer(Modifier.height(4.dp))
+            Text(saveBlocker, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (variants.size > 1) {
             Spacer(Modifier.height(6.dp))
             Text("Quality", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -282,7 +297,7 @@ private fun MediaCard(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalButton(onClick = {}, enabled = false) {
+            FilledTonalButton(onClick = { onSave(chosen) }, enabled = saveBlocker == null) {
                 Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Save")

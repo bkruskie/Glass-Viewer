@@ -63,6 +63,21 @@ interface DownloadDao {
     )
     suspend fun updateProgress(id: String, status: String, downloaded: Long, total: Long?, error: String?, updatedAt: Long)
 
+    @Query("UPDATE downloads SET status = :status, errorMessage = :error, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setStatus(id: String, status: String, error: String?, updatedAt: Long)
+
+    @Query("UPDATE downloads SET resumeState = :state, downloadedBytes = :downloaded, totalBytes = :total, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun saveResume(id: String, state: String?, downloaded: Long, total: Long?, updatedAt: Long)
+
+    @Query(
+        "UPDATE downloads SET status = 'COMPLETED', destinationUri = :uri, downloadedBytes = :bytes, totalBytes = :bytes, " +
+            "fileName = :fileName, mimeType = :mimeType, errorMessage = NULL, resumeState = NULL, updatedAt = :updatedAt WHERE id = :id",
+    )
+    suspend fun markCompleted(id: String, uri: String, fileName: String, mimeType: String, bytes: Long, updatedAt: Long)
+
+    @Query("SELECT * FROM downloads WHERE status IN ('QUEUED', 'RUNNING')")
+    suspend fun active(): List<DownloadEntity>
+
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun delete(id: String)
 

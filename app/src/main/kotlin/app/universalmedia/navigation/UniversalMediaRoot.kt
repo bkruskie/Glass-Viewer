@@ -1,7 +1,12 @@
 package app.universalmedia.navigation
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,7 +20,9 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -25,6 +32,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
+import app.universalmedia.core.model.DetectedMedia
+import app.universalmedia.core.model.MediaVariant
+import app.universalmedia.media.download.MediaDownloadManager
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -85,6 +102,31 @@ fun UniversalMediaRoot(
         ),
     )
 
+    // ---- Saving media -------------------------------------------------------------
+    val scope = rememberCoroutineScope()
+    var duplicate by remember { mutableStateOf<Pair<DetectedMedia, MediaVariant?>?>(null) }
+    var askedNotifications by rememberSaveable { mutableStateOf(false) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val save: (DetectedMedia, MediaVariant?, Boolean) -> Unit = { media, variant, allowDuplicate ->
+        scope.launch {
+            when (val result = container.downloads.enqueue(media, variant, allowDuplicate)) {
+                is MediaDownloadManager.EnqueueResult.Queued -> {
+                    Toast.makeText(context, "Added to downloads", Toast.LENGTH_SHORT).show()
+                    val needsPermission = Build.VERSION.SDK_INT >= 33 &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                        PackageManager.PERMISSION_GRANTED
+                    if (needsPermission && !askedNotifications) {
+                        askedNotifications = true
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+                MediaDownloadManager.EnqueueResult.Duplicate -> duplicate = media to variant
+                is MediaDownloadManager.EnqueueResult.NotSupported ->
+                    Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     LaunchedEffect(incomingUrl) {
         if (incomingUrl != null) {
             browserViewModel.openShared(incomingUrl)
@@ -129,11 +171,16 @@ fun UniversalMediaRoot(
                 exitTransition = { fadeOut(tween(160)) },
             ) {
                 composable(TopDestination.BROWSER.route) {
-                    BrowserScreen(browserViewModel, webViewPool, onOpenSettings = openSettings)
+                    BrowserScreen(
+                        browserViewModel,
+                        webViewPool,
+                        onOpenSettings = openSettings,
+                        onSave = { media, variant -> save(media, variant, false) },
+                    )
                 }
                 composable(TopDestination.DOWNLOADS.route) {
                     DownloadsScreen(
-                        container.database.downloadDao(),
+                        container.downloads,
                         onOpenBrowser = { navController.navigateTopLevel(TopDestination.BROWSER.route) },
                     )
                 }
@@ -164,6 +211,21 @@ fun UniversalMediaRoot(
             }
         }
         FullscreenVideoHost(webViewPool)
+    }
+
+    duplicate?.let { (media, variant) ->
+        AlertDialog(
+            onDismissRequest = { duplicate = null },
+            title = { Text("Already downloaded") },
+            text = { Text("“${media.title ?: "This media"}” is already in your downloads. Download it again?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    duplicate = null
+                    save(media, variant, true)
+                }) { Text("Download again") }
+            },
+            dismissButton = { TextButton(onClick = { duplicate = null }) { Text("Cancel") } },
+        )
     }
 }
 

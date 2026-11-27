@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -14,7 +16,7 @@ import androidx.room.RoomDatabase
         PlaylistEntity::class,
         PlaylistItemEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class UniversalMediaDatabase : RoomDatabase() {
@@ -27,9 +29,20 @@ abstract class UniversalMediaDatabase : RoomDatabase() {
     companion object {
         private const val NAME = "universal_media.db"
 
+        /** v2: download engine fields (Milestone 3). */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE downloads ADD COLUMN variantUrl TEXT")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN resumeState TEXT")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN mimeType TEXT")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN audioOnly INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun create(context: Context): UniversalMediaDatabase =
             Room.databaseBuilder(context.applicationContext, UniversalMediaDatabase::class.java, NAME)
-                // Future schema changes ship explicit Migration objects; never destructive.
+                // Every schema change ships an explicit Migration; never destructive.
+                .addMigrations(MIGRATION_1_2)
                 .build()
 
         fun inMemory(context: Context): UniversalMediaDatabase =

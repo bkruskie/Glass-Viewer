@@ -96,6 +96,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.universalmedia.core.database.BookmarkEntity
+import app.universalmedia.core.model.DetectedMedia
+import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.core.ui.components.FeatureCard
 import app.universalmedia.core.ui.components.GlowIcon
 import app.universalmedia.core.ui.components.SectionHeader
@@ -108,6 +110,7 @@ fun BrowserScreen(
     pool: WebViewPool,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    onSave: (DetectedMedia, MediaVariant?) -> Unit = { _, _ -> },
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val tab = state.activeTab
@@ -214,6 +217,7 @@ fun BrowserScreen(
         state = state,
         onDismiss = { sheet = BrowserSheet.NONE },
         viewModel = viewModel,
+        onSave = onSave,
     )
 }
 

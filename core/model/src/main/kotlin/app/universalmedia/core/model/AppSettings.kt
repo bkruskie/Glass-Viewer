@@ -19,6 +19,8 @@ data class AppSettings(
     // Downloads (consumed by the download engine, Milestone 3)
     val wifiOnlyDownloads: Boolean = false,
     val maxConcurrentDownloads: Int = 3,
+    /** Storage Access Framework tree URI chosen by the user; null = Movies/Music "Universal Media". */
+    val downloadTreeUri: String? = null,
     // Appearance
     val pureBlackTheme: Boolean = false,
 )
