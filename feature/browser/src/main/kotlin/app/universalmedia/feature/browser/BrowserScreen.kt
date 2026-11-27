@@ -189,23 +189,12 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                 )
             }
-            AnimatedVisibility(
+            DetectedMediaButton(
                 visible = tab.detected.isNotEmpty() && !tab.isStartPage,
-                enter = scaleIn() + fadeIn(),
-                exit = scaleOut() + fadeOut(),
+                count = tab.detected.size,
+                onClick = { sheet = BrowserSheet.MEDIA },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            ) {
-                ExtendedFloatingActionButton(
-                    onClick = { sheet = BrowserSheet.MEDIA },
-                    icon = { Icon(Icons.Rounded.Download, contentDescription = null) },
-                    text = {
-                        val n = tab.detected.size
-                        Text(if (n == 1) "1 media found" else "$n media found")
-                    },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                )
-            }
+            )
         }
     }
 
@@ -215,6 +204,25 @@ fun BrowserScreen(
         onDismiss = { sheet = BrowserSheet.NONE },
         viewModel = viewModel,
     )
+}
+
+/** Kept outside any Row/Column scope so the plain AnimatedVisibility overload is used. */
+@Composable
+private fun DetectedMediaButton(visible: Boolean, count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = scaleIn() + fadeIn(),
+        exit = scaleOut() + fadeOut(),
+        modifier = modifier,
+    ) {
+        ExtendedFloatingActionButton(
+            onClick = onClick,
+            icon = { Icon(Icons.Rounded.Download, contentDescription = null) },
+            text = { Text(if (count == 1) "1 media found" else "$count media found") },
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+    }
 }
 
 @Composable
