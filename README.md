@@ -1,0 +1,46 @@
+# Universal Media
+
+A free, private, all-in-one media app for Android: browse, detect, download, play, cast, mirror and transfer video and audio. No accounts, no ads, no cloud.
+
+**Current version:** `0.1.0-m1`, Milestone 1 (Foundation). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
+
+## What works in this build
+
+- **Browser** with tabs, address bar (search or URL), history, bookmarks, fullscreen video, Safe Browsing and third-party cookie blocking.
+- **Automatic media detection** in the browser: video, audio, HLS and DASH sources appear behind a "N media found" button, with DRM identified and explained.
+- **Share to Universal Media** from any app, or open web links with it.
+- **Library**: add videos and music from your phone, search, filter, favourites. Files stay where they are.
+- **Settings**: detection, search engine, JavaScript, cookies, download preferences, pure-black theme, clear browsing data.
+- Downloads, Player and Connect screens are in place for the next milestones.
+
+## Build
+
+Requirements: JDK 17 and the Android SDK (API 35). Android Studio Ladybug or newer opens the project directly.
+
+```bash
+./gradlew test                # JVM unit tests
+./gradlew :app:assembleDebug  # APK in app/build/outputs/apk/debug/
+./gradlew connectedCheck      # instrumented tests (device or emulator)
+```
+
+### No computer? Build on GitHub for free
+
+1. Create a GitHub repository and upload this folder.
+2. GitHub Actions runs `.github/workflows/android.yml` on every push: tests, lint and a debug APK.
+3. Open the run under **Actions → Build & test** and download `universal-media-debug-apk` on your phone to install it.
+
+## Project layout
+
+```
+app/                 entry point, navigation, DI
+core/model           domain models (pure Kotlin)
+core/ui              theme and shared components
+core/database        Room database
+core/datastore       settings
+media/detection      detection engine (pure Kotlin, unit tested)
+feature/*            browser, downloads, player, library, connect, settings
+```
+
+## License
+
+Choose a license before publishing (Apache 2.0 or GPL-3.0 are common for apps like this). All current dependencies are Apache 2.0.

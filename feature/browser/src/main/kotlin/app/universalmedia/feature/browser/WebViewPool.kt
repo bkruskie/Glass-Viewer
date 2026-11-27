@@ -1,0 +1,199 @@
+package app.universalmedia.feature.browser
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Bitmap
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
+import app.universalmedia.core.model.AppSettings
+import org.json.JSONArray
+import org.json.JSONTokener
+
+/** Callbacks from WebView into the browser state holder. */
+interface BrowserEvents {
+    fun onPageStarted(tabId: String, url: String)
+    fun onPageFinished(tabId: String, url: String, title: String)
+    fun onUrlChanged(tabId: String, url: String)
+    fun onTitleChanged(tabId: String, title: String)
+    fun onProgress(tabId: String, progress: Int)
+    fun onNavigationState(tabId: String, canGoBack: Boolean, canGoForward: Boolean)
+
+    /** Invoked on a background thread for every resource the page requests. */
+    fun onResourceRequest(tabId: String, url: String, mimeHint: String?)
+
+    /** Media element sources found by the in-page probe. */
+    fun onPageMedia(tabId: String, urls: List<String>)
+}
+
+/**
+ * Activity-scoped owner of one WebView per tab, so pages keep their state while
+ * the user moves between Browser, Library, etc. Destroy with [destroyAll].
+ */
+class WebViewPool(private val context: Context) {
+
+    class FullscreenVideo(val view: View, val callback: WebChromeClient.CustomViewCallback)
+
+    private val views = HashMap<String, WebView>()
+
+    /** Non-null while a page shows a video in fullscreen. Observed by Compose. */
+    var fullscreen by mutableStateOf<FullscreenVideo?>(null)
+        private set
+
+    fun obtain(tabId: String, events: BrowserEvents): WebView =
+        views.getOrPut(tabId) { create(tabId, events) }
+
+    fun peek(tabId: String): WebView? = views[tabId]
+
+    fun retainOnly(tabIds: Set<String>) {
+        (views.keys - tabIds).forEach(::release)
+    }
+
+    fun release(tabId: String) {
+        views.remove(tabId)?.let { webView ->
+            (webView.parent as? ViewGroup)?.removeView(webView)
+            webView.stopLoading()
+            webView.destroy()
+        }
+    }
+
+    fun destroyAll() {
+        views.keys.toList().forEach(::release)
+    }
+
+    fun exitFullscreen() {
+        fullscreen?.callback?.onCustomViewHidden()
+        fullscreen = null
+    }
+
+    fun applySettings(webView: WebView, settings: AppSettings) {
+        webView.settings.javaScriptEnabled = settings.javascriptEnabled
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, !settings.blockThirdPartyCookies)
+    }
+
+    /** Re-runs the in-page media probe, e.g. after the user started a player. */
+    fun scanForMedia(tabId: String, events: BrowserEvents) {
+        val webView = views[tabId] ?: return
+        webView.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
+    }
+
+    /** Wipes cookies, site storage, caches and back/forward history for every tab. */
+    fun clearBrowsingData() {
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        WebStorage.getInstance().deleteAllData()
+        views.values.forEach {
+            it.clearCache(true)
+            it.clearHistory()
+            it.clearFormData()
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun create(tabId: String, events: BrowserEvents): WebView = WebView(context).apply {
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            allowFileAccess = false
+            allowContentAccess = false
+            mediaPlaybackRequiresUserGesture = true
+            javaScriptCanOpenWindowsAutomatically = false
+            setSupportMultipleWindows(false)
+        }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
+        }
+
+        webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                url?.let { events.onPageStarted(tabId, it) }
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                if (view == null || url == null) return
+                events.onPageFinished(tabId, url, view.title.orEmpty())
+                events.onNavigationState(tabId, view.canGoBack(), view.canGoForward())
+                if (view.settings.javaScriptEnabled) {
+                    view.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
+                }
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                if (view == null || url == null) return
+                events.onUrlChanged(tabId, url)
+                events.onNavigationState(tabId, view.canGoBack(), view.canGoForward())
+            }
+
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                // Observe only: the request continues untouched to the network.
+                request?.url?.toString()?.let { events.onResourceRequest(tabId, it, null) }
+                return null
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val scheme = request?.url?.scheme?.lowercase() ?: return false
+                // Stay inside the browser for web content; block app-launching schemes (intent:, market:...).
+                return scheme !in setOf("http", "https", "about", "data", "blob")
+            }
+        }
+
+        webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                events.onProgress(tabId, newProgress)
+            }
+
+            override fun onReceivedTitle(view: WebView?, title: String?) {
+                events.onTitleChanged(tabId, title.orEmpty())
+            }
+
+            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                if (view == null || callback == null) return
+                fullscreen = FullscreenVideo(view, callback)
+            }
+
+            override fun onHideCustomView() {
+                fullscreen = null
+            }
+        }
+    }
+
+    companion object {
+        /** Collects the sources of <video>/<audio> elements; returns a JSON array string. */
+        private const val MEDIA_PROBE_JS = """
+            (function() {
+              try {
+                var out = [];
+                document.querySelectorAll('video, audio, video source, audio source').forEach(function(e) {
+                  var s = e.currentSrc || e.src;
+                  if (s && s.indexOf('blob:') !== 0 && out.indexOf(s) < 0) out.push(s);
+                });
+                return JSON.stringify(out);
+              } catch (err) { return '[]'; }
+            })();
+        """
+
+        internal fun parseProbeResult(raw: String?): List<String> = try {
+            val inner = raw?.let { JSONTokener(it).nextValue() } as? String ?: return emptyList()
+            val array = JSONArray(inner)
+            List(array.length()) { array.optString(it) }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+}
