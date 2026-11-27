@@ -40,6 +40,7 @@ Videos protected by DRM (most paid streaming services) can't be saved; the app s
 
 - Everything you download, plus files you add with **Add files**. Search, filter (video, audio, favorites) and **Sort**.
 - ⋮ on any item: **Add to playlist**, Rename, **Details** (resolution, codecs, bitrate, where it's saved), Share, Open with…, Remove from library (file stays), **Delete from phone** (asks first).
+- **Folders:** ⋮ › *Put in folder…* sorts items into your own folders (chips above the list; tap a selected folder chip to rename or remove it). *Copy / Move to phone folder…* puts the actual file anywhere on the phone or SD card.
 - **Playlists** chip: create playlists, reorder, Play all or Shuffle. **Play all** plays whatever list you are looking at.
 
 ## Connect: TVs
