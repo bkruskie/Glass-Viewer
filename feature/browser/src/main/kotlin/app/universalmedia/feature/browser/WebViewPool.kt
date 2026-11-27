@@ -145,6 +145,8 @@ class WebViewPool(private val context: Context) {
                 events.onPageFinished(tabId, url, view.title.orEmpty())
                 events.onNavigationState(tabId, view.canGoBack(), view.canGoForward())
                 readPageSource(view, tabId, events)
+                // Many sites add their player a moment after the page loads; look again once.
+                view.postDelayed({ if (view.url == url && views[tabId] === view) readPageSource(view, tabId, events) }, 4_000)
                 if (view.settings.javaScriptEnabled && !liveProbeSupported) {
                     view.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
                 }

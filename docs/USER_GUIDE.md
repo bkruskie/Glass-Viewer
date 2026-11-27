@@ -15,6 +15,8 @@ Free, private, no account. Everything stays on your phone and your own Wi-Fi.
 3. Tap it to see each source grouped by quality (resolution, bitrate, estimated size, length).
 4. Choose **Play** to watch now or **Save** to download.
 
+The app looks at the requests a page makes, the stream links in its code, and what the page declares about its own video (the tags sites use for link previews and search engines), so the media button often lights up before you press play.
+
 You can also **share** a link to Universal Media from any app, or open copied links.
 
 Videos protected by DRM (most paid streaming services) can't be saved; the app says so instead of saving a broken file.

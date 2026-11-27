@@ -14,6 +14,7 @@ import app.universalmedia.core.model.AppSettings
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.DetectionOrigin
 import app.universalmedia.media.detection.MediaDetectionEngine
+import app.universalmedia.media.detection.PageMetadata
 import app.universalmedia.media.detection.PageSourceScanner
 import app.universalmedia.media.detection.ResolveRequest
 import app.universalmedia.media.detection.ResolveResult
@@ -239,9 +240,12 @@ class BrowserViewModel(
         updateTab(tabId) { it.copy(canGoBack = canGoBack, canGoForward = canGoForward) }
 
     /** Called on the WebView's network thread for every sub-resource. Must stay cheap. */
-    override fun onResourceRequest(tabId: String, url: String, mimeHint: String?) {
+    override fun onResourceRequest(tabId: String, url: String, mimeHint: String?) = resolveFound(tabId, url, mimeHint, null)
+
+    /** [declared] is what the page says about its own video (title, length), when known. */
+    private fun resolveFound(tabId: String, url: String, mimeHint: String?, declared: PageMetadata.Declared?) {
         if (!settings.value.detectionEnabled) return
-        if (!detectionEngine.isCandidate(url, mimeHint)) return
+        if (declared == null && !detectionEngine.isCandidate(url, mimeHint)) return
         val tab = session.value.tabs.firstOrNull { it.id == tabId } ?: return
         if (tab.detected.any { it.mediaUrl == url }) return
         viewModelScope.launch {
@@ -250,11 +254,13 @@ class BrowserViewModel(
                     url = url,
                     origin = DetectionOrigin.IN_APP_BROWSER,
                     pageUrl = tab.url.ifBlank { null },
-                    pageTitle = tab.title,
+                    pageTitle = declared?.title ?: tab.title,
                     mimeType = mimeHint,
                 ),
             )
-            if (result is ResolveResult.Found) addDetected(tabId, result.media)
+            if (result is ResolveResult.Found) {
+                addDetected(tabId, result.media.map { m -> if (m.durationMs == null && declared?.durationMs != null) m.copy(durationMs = declared.durationMs) else m })
+            }
         }
     }
 
@@ -264,8 +270,19 @@ class BrowserViewModel(
 
     override fun onPageSource(tabId: String, html: String) {
         if (!settings.value.detectionEnabled) return
+        val pageUrl = session.value.tabs.firstOrNull { it.id == tabId }?.url?.ifBlank { null }
         viewModelScope.launch(Dispatchers.Default) {
-            PageSourceScanner.findManifestUrls(html).forEach { onResourceRequest(tabId, it, null) }
+            // What the page declares as its own video (Open Graph, JSON-LD, <video>, player setup).
+            val declared = PageMetadata.read(html, pageUrl)
+            declared.urls.forEach { resolveFound(tabId, it, null, declared) }
+            // Fill in the length for media the player already loaded, when the page states it.
+            if (declared.durationMs != null) {
+                updateTab(tabId) { tab ->
+                    if (tab.detected.none { it.durationMs == null && it.mediaUrl in declared.urls }) tab
+                    else tab.copy(detected = tab.detected.map { if (it.durationMs == null && it.mediaUrl in declared.urls) it.copy(durationMs = declared.durationMs) else it })
+                }
+            }
+            PageSourceScanner.findManifestUrls(html).forEach { if (it !in declared.urls) onResourceRequest(tabId, it, null) }
         }
     }
 
