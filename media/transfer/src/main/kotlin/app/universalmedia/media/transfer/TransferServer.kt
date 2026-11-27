@@ -112,8 +112,12 @@ class TransferServer(
         }
     }
 
-    private fun handle(client: Socket) = client.use { s ->
-        runCatching {
+    private fun handle(client: Socket) {
+        client.use { s -> runCatching { serve(s) } }
+    }
+
+    private fun serve(s: Socket) {
+        run {
             s.soTimeout = 60_000
             val input = BufferedInputStream(s.getInputStream())
             val out = s.getOutputStream()
