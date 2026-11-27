@@ -125,7 +125,7 @@ internal fun MirrorSection(discovery: ReceiverDiscovery) {
  * Opens the phone's own screen mirroring (Samsung Smart View, or Android's Cast screen),
  * which can use the TV's built-in "Screen mirroring" input. Apps aren't allowed to use it directly.
  */
-private fun openSystemMirroring(context: android.content.Context) {
+internal fun openSystemMirroring(context: android.content.Context) {
     val pm = context.packageManager
     val candidates = listOfNotNull(
         pm.getLaunchIntentForPackage("com.samsung.android.smartmirroring"),

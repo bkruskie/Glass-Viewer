@@ -17,19 +17,12 @@ import okhttp3.OkHttpClient
 
 class CastException(message: String) : Exception(message)
 
-enum class CastKind { GOOGLE_CAST, DLNA, TV_BROWSER }
+enum class CastKind { GOOGLE_CAST, DLNA, ROKU, TV_BROWSER }
 
 data class CastDevice(val id: String, val name: String, val kind: CastKind, val detail: String? = null)
 
 /** Something to play on the TV. [uri] may be content:// (served by the phone) or http(s). */
 data class CastItem(val title: String, val uri: String, val mimeType: String?)
-
-data class RemoteStatus(
-    val positionMs: Long = 0,
-    val durationMs: Long = 0,
-    val playing: Boolean = false,
-    val ended: Boolean = false,
-)
 
 data class ActiveCast(
     val device: CastDevice,
@@ -59,6 +52,11 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
     private val _active = MutableStateFlow<ActiveCast?>(null)
     val active: StateFlow<ActiveCast?> = _active.asStateFlow()
 
+    private val _networkTvs = MutableStateFlow<List<NetworkTv>>(emptyList())
+    /** Every TV seen on the Wi-Fi, castable or not, with advice for each. */
+    val networkTvs: StateFlow<List<NetworkTv>> = _networkTvs.asStateFlow()
+    private val airplay = AirPlayDiscovery(appContext)
+
     private val _searching = MutableStateFlow(false)
     val searching: StateFlow<Boolean> = _searching.asStateFlow()
 
@@ -78,11 +76,15 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         if (discoveryJob?.isActive == true) return
         scope.launch(Dispatchers.IO) { server.start() }.invokeOnCompletion { scope.launch(Dispatchers.Main) { rebuildDevices() } }
         google.startDiscovery()
+        airplay.start { publishTvs() }
         discoveryJob = scope.launch {
             while (isActive) {
                 _searching.value = true
                 val found = runCatching { dlna.discover() }.getOrDefault(emptyList())
                 if (found.isNotEmpty()) dlnaRenderers.update { old -> old + found.associateBy { it.usn } }
+                val tvs = runCatching { dlna.scanAll() }.getOrDefault(emptyList())
+                if (tvs.isNotEmpty()) scannedTvs = (scannedTvs + tvs.associateBy { it.id })
+                publishTvs()
                 _searching.value = false
                 withContext(Dispatchers.Main) { rebuildDevices() }
                 delay(15_000)
@@ -95,6 +97,19 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         discoveryJob = null
         _searching.value = false
         google.stopDiscovery()
+        airplay.stop()
+    }
+
+    @Volatile private var scannedTvs: Map<String, NetworkTv> = emptyMap()
+
+    private fun publishTvs() {
+        val scanned = scannedTvs.values.toList()
+        val names = scanned.map { it.name.lowercase() }.toSet()
+        val airplayOnly = airplay.names.filter { it.lowercase() !in names }.map {
+            NetworkTv("airplay:$it", it, TvClassifier.brandOf(it), null, "", NetworkTv.Kind.AIRPLAY)
+        }
+        _networkTvs.value = (scanned + airplayOnly).sortedWith(compareBy({ it.kind.ordinal }, { it.name }))
+        scope.launch(Dispatchers.Main) { rebuildDevices() }
     }
 
     private fun rebuildDevices() {
@@ -102,6 +117,9 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         google.routes.value.forEach { list += CastDevice(it.id, it.name, CastKind.GOOGLE_CAST, it.description?.toString()) }
         dlnaRenderers.value.values.sortedBy { it.friendlyName }.forEach { r ->
             list += CastDevice(r.usn, r.friendlyName, CastKind.DLNA, listOfNotNull(r.manufacturer, r.modelName).joinToString(" ").ifBlank { null })
+        }
+        _networkTvs.value.filter { it.kind == NetworkTv.Kind.ROKU }.forEach { tv ->
+            list += CastDevice(tv.id, tv.name, CastKind.ROKU, listOfNotNull("Roku", tv.model, "· experimental").joinToString(" "))
         }
         server.baseUrl.value?.let { base ->
             list += CastDevice("tv-browser", "Any TV with a web browser", CastKind.TV_BROWSER, "Open $base/tv on the TV")
@@ -123,6 +141,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                         val renderer = dlnaRenderers.value[device.id] ?: throw CastException("That TV is no longer available.")
                         dlna.load(renderer, url, item.title, mime)
                     }
+                    CastKind.ROKU -> dlna.rokuPlay(rokuHost(device), url, mime)
                     CastKind.TV_BROWSER -> server.webReceiver.load(url, item.title)
                 }
                 _active.update { it?.copy(connecting = false, error = null) }
@@ -138,6 +157,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.play() }
             CastKind.DLNA -> renderer(device)?.let { dlna.play(it) }
+            CastKind.ROKU -> dlna.rokuKey(rokuHost(device), "Play")
             CastKind.TV_BROWSER -> server.webReceiver.send("play")
         }
     }
@@ -146,6 +166,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.pause() }
             CastKind.DLNA -> renderer(device)?.let { dlna.pause(it) }
+            CastKind.ROKU -> dlna.rokuKey(rokuHost(device), "Play") // Roku's Play key toggles
             CastKind.TV_BROWSER -> server.webReceiver.send("pause")
         }
     }
@@ -154,6 +175,10 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.seek(ms) }
             CastKind.DLNA -> renderer(device)?.let { dlna.seek(it, ms) }
+            CastKind.ROKU -> {
+                val now = _active.value?.status?.positionMs ?: 0
+                dlna.rokuKey(rokuHost(device), if (ms >= now) "Fwd" else "Rev")
+            }
             CastKind.TV_BROWSER -> server.webReceiver.send("seek", ms)
         }
     }
@@ -162,6 +187,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.changeVolume(if (up) 0.1 else -0.1) }
             CastKind.DLNA -> renderer(device)?.let { dlna.changeVolume(it, if (up) 5 else -5) }
+            CastKind.ROKU -> dlna.rokuKey(rokuHost(device), if (up) "VolumeUp" else "VolumeDown")
             CastKind.TV_BROWSER -> server.webReceiver.send(if (up) "vol+" else "vol-")
         }
     }
@@ -178,6 +204,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                 when (current.device.kind) {
                     CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.stop() }
                     CastKind.DLNA -> renderer(current.device)?.let { dlna.stop(it) }
+                    CastKind.ROKU -> dlna.rokuKey(rokuHost(current.device), "Home")
                     CastKind.TV_BROWSER -> server.webReceiver.load(null, "")
                 }
             }
@@ -205,6 +232,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                     when (device.kind) {
                         CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.status() }
                         CastKind.DLNA -> renderer(device)?.let { dlna.status(it) }
+                        CastKind.ROKU -> dlna.rokuStatus(rokuHost(device))
                         CastKind.TV_BROWSER -> server.webReceiver.let { w ->
                             RemoteStatus(w.positionMs, w.durationMs, playing = !w.paused)
                         }
@@ -215,6 +243,9 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
             }
         }
     }
+
+    private fun rokuHost(device: CastDevice): String =
+        _networkTvs.value.firstOrNull { it.id == device.id }?.host ?: throw CastException("That Roku is no longer available.")
 
     private fun renderer(device: CastDevice): DlnaRenderer? = dlnaRenderers.value[device.id]
 

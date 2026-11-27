@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import app.universalmedia.media.cast.NetworkTv
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.Forward10
@@ -107,6 +108,7 @@ fun ConnectScreen(
     val active by cast.active.collectAsStateWithLifecycle()
     val searching by cast.searching.collectAsStateWithLifecycle()
     val tvAddress by cast.tvBrowserAddress.collectAsStateWithLifecycle()
+    val networkTvs by cast.networkTvs.collectAsStateWithLifecycle()
     var pickFor by remember { mutableStateOf<CastDevice?>(null) }
     var openInfo by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -173,13 +175,14 @@ fun ConnectScreen(
                     FeatureCard(
                         icon = when (device.kind) {
                             CastKind.GOOGLE_CAST -> Icons.Rounded.Cast
-                            CastKind.DLNA -> Icons.Rounded.Tv
+                            CastKind.DLNA, CastKind.ROKU -> Icons.Rounded.Tv
                             CastKind.TV_BROWSER -> Icons.Rounded.Language
                         },
                         title = device.name,
                         subtitle = device.detail ?: when (device.kind) {
                             CastKind.GOOGLE_CAST -> "Chromecast / Google TV"
                             CastKind.DLNA -> "Smart TV (DLNA)"
+                            CastKind.ROKU -> "Roku · experimental"
                             CastKind.TV_BROWSER -> "Open the address in the TV's browser"
                         },
                         tint = if (device.kind == CastKind.TV_BROWSER) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
@@ -196,6 +199,8 @@ fun ConnectScreen(
                     )
                 }
             }
+
+            WifiTvsSection(networkTvs.filter { it.kind == NetworkTv.Kind.TV_OTHER || it.kind == NetworkTv.Kind.AIRPLAY })
 
             MirrorSection(mirrorDiscovery)
 
@@ -349,5 +354,46 @@ private fun PickRow(title: String, subtitle: String, thumbnail: String?, isAudio
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+}
+
+/** TVs that answered on the Wi-Fi but can't take video from the app as they are set up, with the step that works. */
+@Composable
+private fun WifiTvsSection(tvs: List<NetworkTv>) {
+    if (tvs.isEmpty()) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var open by remember { mutableStateOf<NetworkTv?>(null) }
+    SectionHeader("Other TVs on your Wi-Fi")
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tvs.forEach { tv ->
+            FeatureCard(
+                Icons.Rounded.Tv,
+                tv.name,
+                listOfNotNull(listOfNotNull(tv.brand, tv.model).joinToString(" ").ifBlank { null }, tv.advice).joinToString(" · "),
+                tint = MaterialTheme.colorScheme.tertiary,
+                onClick = { open = tv },
+            )
+        }
+    }
+    open?.let { tv ->
+        AlertDialog(
+            onDismissRequest = { open = null },
+            icon = { Icon(Icons.Rounded.Tv, contentDescription = null) },
+            title = { Text(tv.name) },
+            text = {
+                Text(
+                    listOfNotNull(
+                        listOfNotNull(tv.brand, tv.model).joinToString(" ").ifBlank { null },
+                        tv.host.ifBlank { null }?.let { "Address: $it" },
+                        tv.advice,
+                        "After changing a TV setting, come back here: the TV shows up under Play on a TV within about 15 seconds.",
+                    ).joinToString("\n\n"),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { open = null; openSystemMirroring(context) }) { Text("Open Smart View") }
+            },
+            dismissButton = { TextButton(onClick = { open = null }) { Text("Close") } },
+        )
     }
 }

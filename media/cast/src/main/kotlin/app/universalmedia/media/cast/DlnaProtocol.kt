@@ -30,6 +30,59 @@ object DlnaProtocol {
             "ST: $RENDERER\r\n" +
             "USER-AGENT: Android UPnP/1.0 UniversalMedia/1.0\r\n\r\n"
 
+    /** Asks every UPnP device on the network to answer (TVs, Rokus, speakers, routers…). */
+    val searchAllRequest: String =
+        "M-SEARCH * HTTP/1.1\r\n" +
+            "HOST: $SSDP_ADDRESS:$SSDP_PORT\r\n" +
+            "MAN: \"ssdp:discover\"\r\n" +
+            "MX: 2\r\n" +
+            "ST: ssdp:all\r\n" +
+            "USER-AGENT: Android UPnP/1.0 UniversalMedia/1.0\r\n\r\n"
+
+    /** Raw SSDP answer: where its description is, its id, what it says it is, and its server string. */
+    data class SsdpAnswer(val location: String, val usn: String, val st: String, val server: String)
+
+    fun parseAnswer(text: String): SsdpAnswer? {
+        val lines = text.split("\r\n", "\n")
+        if (lines.firstOrNull()?.startsWith("HTTP/1.1 200", ignoreCase = true) != true) return null
+        val headers = lines.drop(1).mapNotNull { line ->
+            val i = line.indexOf(':')
+            if (i <= 0) null else line.substring(0, i).trim().uppercase() to line.substring(i + 1).trim()
+        }.toMap()
+        val location = headers["LOCATION"]?.takeIf { UrlUtils.isHttp(it) } ?: return null
+        return SsdpAnswer(
+            location = location,
+            usn = headers["USN"]?.substringBefore("::")?.ifBlank { null } ?: location,
+            st = headers["ST"].orEmpty(),
+            server = headers["SERVER"].orEmpty(),
+        )
+    }
+
+    /** Basic identity from a UPnP device description. */
+    data class DeviceIdentity(
+        val friendlyName: String?,
+        val manufacturer: String?,
+        val modelName: String?,
+        val deviceTypes: List<String>,
+        val hasAvTransport: Boolean,
+    )
+
+    fun parseIdentity(xml: String): DeviceIdentity? {
+        val root = MiniXml.parse(xml) ?: return null
+        val device = root.child("device") ?: return null
+        fun devices(d: XmlElement): List<XmlElement> = listOf(d) + d.child("deviceList")?.all("device").orEmpty().flatMap { devices(it) }
+        val all = devices(device)
+        return DeviceIdentity(
+            friendlyName = device.child("friendlyName")?.text?.ifBlank { null },
+            manufacturer = device.child("manufacturer")?.text?.ifBlank { null },
+            modelName = device.child("modelName")?.text?.ifBlank { null },
+            deviceTypes = all.mapNotNull { it.child("deviceType")?.text },
+            hasAvTransport = allServices(device).any {
+                it.child("serviceType")?.text?.startsWith("urn:schemas-upnp-org:service:AVTransport") == true
+            },
+        )
+    }
+
     /** Parses an SSDP response; returns (LOCATION, USN) or null. */
     fun parseSearchResponse(text: String): Pair<String, String>? {
         val lines = text.split("\r\n", "\n")

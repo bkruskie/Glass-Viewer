@@ -55,6 +55,83 @@ internal class DlnaClient(private val context: Context, private val http: OkHttp
         }
     }
 
+    /** Asks every UPnP device on the Wi-Fi to answer, and returns the ones that look like TVs. */
+    suspend fun scanAll(timeoutMs: Int = 3_000): List<NetworkTv> = withContext(Dispatchers.IO) {
+        val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+        val lock = wifi?.createMulticastLock("universal-media-ssdp-all")?.apply { setReferenceCounted(false) }
+        val answers = LinkedHashMap<String, DlnaProtocol.SsdpAnswer>() // usn+st -> answer
+        try {
+            lock?.acquire()
+            DatagramSocket().use { socket ->
+                socket.soTimeout = 500
+                val target = InetAddress.getByName(DlnaProtocol.SSDP_ADDRESS)
+                val requests = listOf(
+                    DlnaProtocol.searchAllRequest,
+                    DlnaProtocol.searchAllRequest.replace("ST: ssdp:all", "ST: roku:ecp"),
+                    DlnaProtocol.searchAllRequest.replace("ST: ssdp:all", "ST: urn:dial-multiscreen-org:service:dial:1"),
+                )
+                requests.forEach { r ->
+                    val data = r.toByteArray()
+                    socket.send(DatagramPacket(data, data.size, target, DlnaProtocol.SSDP_PORT))
+                }
+                val buffer = ByteArray(4096)
+                val deadline = System.currentTimeMillis() + timeoutMs
+                while (System.currentTimeMillis() < deadline) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    try {
+                        socket.receive(packet)
+                    } catch (e: SocketTimeoutException) {
+                        continue
+                    }
+                    DlnaProtocol.parseAnswer(String(packet.data, 0, packet.length))?.let { a ->
+                        answers.putIfAbsent(a.usn + "|" + a.st, a)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // No Wi-Fi or multicast blocked.
+        } finally {
+            runCatching { lock?.release() }
+        }
+        val identities = answers.values.map { it.location }.distinct().take(40).mapNotNull { location ->
+            runCatching {
+                val xml = http.newCall(Request.Builder().url(location).build()).execute().use { it.body?.string() }
+                xml?.let { DlnaProtocol.parseIdentity(it) }?.let { location to it }
+            }.getOrNull()
+        }.toMap()
+        TvClassifier.classify(answers.values.toList(), identities)
+    }
+
+    /** Roku External Control: asks the Roku to play [url] in its built-in player (experimental). */
+    suspend fun rokuPlay(host: String, url: String, mimeType: String) = withContext(Dispatchers.IO) {
+        val format = when {
+            "mpegurl" in mimeType.lowercase() -> "hls"
+            "dash" in mimeType.lowercase() -> "dash"
+            "mp2t" in mimeType.lowercase() -> "ts"
+            "matroska" in mimeType.lowercase() -> "mkv"
+            else -> "mp4"
+        }
+        val target = "http://$host:8060/input/15985?t=v&u=" + java.net.URLEncoder.encode(url, "UTF-8") + "&k=(null)&videoFormat=$format"
+        rokuPost(target)
+    }
+
+    suspend fun rokuKey(host: String, key: String) = withContext(Dispatchers.IO) { rokuPost("http://$host:8060/keypress/$key") }
+
+    /** Reads the Roku's player state; null when it doesn't say. */
+    suspend fun rokuStatus(host: String): RemoteStatus? = withContext(Dispatchers.IO) {
+        val xml = http.newCall(Request.Builder().url("http://$host:8060/query/media-player").build()).execute()
+            .use { it.body?.string() } ?: return@withContext null
+        RokuProtocol.parsePlayer(xml)
+    }
+
+    private fun rokuPost(url: String) {
+        val request = Request.Builder().url(url).post(ByteArray(0).toRequestBody(null)).build()
+        http.newCall(request).execute().use { response ->
+            if (response.code == 403) throw CastException("The Roku refused. On the Roku, turn on Settings › System › Advanced system settings › Control by mobile apps › Network access.")
+            if (!response.isSuccessful) throw CastException("The Roku didn't accept the video (${response.code}).")
+        }
+    }
+
     suspend fun load(renderer: DlnaRenderer, url: String, title: String, mimeType: String) {
         runCatching { action(renderer.avTransportUrl, DlnaProtocol.AV_TRANSPORT, "Stop", listOf("InstanceID" to "0")) }
         action(
