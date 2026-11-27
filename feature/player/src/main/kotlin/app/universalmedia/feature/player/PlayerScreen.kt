@@ -95,6 +95,7 @@ fun PlayerScreen(
 ) {
     val current by playback.current.collectAsStateWithLifecycle()
     val problem by playback.problem.collectAsStateWithLifecycle()
+    val queue by playback.queue.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val recent by remember(mediaItemDao) { mediaItemDao.observeRecentlyPlayed(20) }
         .collectAsStateWithLifecycle(emptyList())
@@ -200,6 +201,24 @@ fun PlayerScreen(
                     IconButton(onClick = { onCast(playing) }) { Icon(Icons.Rounded.Cast, contentDescription = "Play on a TV") }
                     IconButton(onClick = playback::stop) { Icon(Icons.Rounded.Close, contentDescription = "Close player") }
                 }
+                queue?.let { q ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = playback::previous) {
+                            Icon(androidx.compose.material.icons.Icons.Rounded.SkipPrevious, contentDescription = "Previous")
+                        }
+                        Text(
+                            "${q.name} · ${q.index + 1} of ${q.items.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = playback::next, enabled = q.hasNext) {
+                            Icon(androidx.compose.material.icons.Icons.Rounded.SkipNext, contentDescription = "Next")
+                        }
+                    }
+                }
                 problem?.let { message ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -210,9 +229,25 @@ fun PlayerScreen(
                     }
                 }
             }
-            if (recent.isNotEmpty()) {
+            val upNext = queue?.let { q -> q.items.withIndex().drop(q.index + 1) }.orEmpty()
+            if (recent.isNotEmpty() || upNext.isNotEmpty()) {
                 LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
-                    item { SectionHeader("Continue watching") }
+                    if (upNext.isNotEmpty()) {
+                        item { SectionHeader("Up next") }
+                        items(upNext, key = { "q${it.index}" }) { (index, request) ->
+                            Text(
+                                request.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { playback.jumpTo(index) }
+                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                            )
+                        }
+                    }
+                    if (recent.isNotEmpty()) item { SectionHeader("Continue watching") }
                     items(recent, key = { it.id }) { item ->
                         RecentRow(item) {
                             playback.play(

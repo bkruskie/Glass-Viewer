@@ -50,6 +50,12 @@ data class PlayRequest(
     }
 }
 
+/** A list played in order (a playlist, or "play all"); [index] is the item playing now. */
+data class PlayQueue(val name: String, val items: List<PlayRequest>, val index: Int) {
+    val hasNext: Boolean get() = index < items.lastIndex
+    val hasPrevious: Boolean get() = index > 0
+}
+
 /**
  * App-wide player (Media3 ExoPlayer). Lives for the process so playback
  * continues while moving between sections, and in picture-in-picture.
@@ -113,7 +119,51 @@ class PlaybackManager(
     val player: ExoPlayer
         get() = exo ?: create().also { exo = it }
 
+    private val _queue = MutableStateFlow<PlayQueue?>(null)
+
+    /** The list being played in order, or null for a single item. */
+    val queue: StateFlow<PlayQueue?> = _queue.asStateFlow()
+
+    /** Plays one item (ends any list). */
     fun play(request: PlayRequest) {
+        _queue.value = null
+        load(request)
+    }
+
+    /** Plays [items] in order, starting at [startIndex]; the next one starts when one ends. */
+    fun playQueue(name: String, items: List<PlayRequest>, startIndex: Int = 0) {
+        if (items.isEmpty()) return
+        val index = startIndex.coerceIn(0, items.lastIndex)
+        _queue.value = PlayQueue(name, items, index)
+        load(items[index])
+    }
+
+    fun next() {
+        val q = _queue.value ?: return
+        if (!q.hasNext) return
+        jumpTo(q.index + 1)
+    }
+
+    /** Back to the start of this item, or to the previous one if near the start. */
+    fun previous() {
+        val q = _queue.value
+        val p = exo
+        if (q == null || !q.hasPrevious || (p != null && p.currentPosition > 3_000)) {
+            p?.seekTo(0)
+            return
+        }
+        jumpTo(q.index - 1)
+    }
+
+    fun jumpTo(index: Int) {
+        val q = _queue.value ?: return
+        if (index !in q.items.indices) return
+        savePosition()
+        _queue.value = q.copy(index = index)
+        load(q.items[index].copy(startPositionMs = 0))
+    }
+
+    private fun load(request: PlayRequest) {
         savePosition()
         _problem.value = null
         val http = OkHttpDataSource.Factory(httpClient).apply {
@@ -199,7 +249,7 @@ class PlaybackManager(
     fun retry() {
         val request = _current.value ?: return
         val position = exo?.currentPosition ?: request.startPositionMs
-        play(request.copy(startPositionMs = position))
+        load(request.copy(startPositionMs = position))
     }
 
     fun stop() {
@@ -209,6 +259,7 @@ class PlaybackManager(
         exo?.stop()
         exo?.clearMediaItems()
         _current.value = null
+        _queue.value = null
     }
 
     fun isPlayingVideo(): Boolean = exo?.let { it.isPlaying && it.videoSize.width > 0 } ?: false
@@ -233,6 +284,10 @@ class PlaybackManager(
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (!isPlaying) savePosition()
+                }
+
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_ENDED && _queue.value?.hasNext == true) next()
                 }
 
                 override fun onPlayerError(error: PlaybackException) {

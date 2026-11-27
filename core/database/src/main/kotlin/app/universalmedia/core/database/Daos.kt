@@ -149,4 +149,28 @@ interface PlaylistDao {
 
     @Query("DELETE FROM playlists WHERE id = :id")
     suspend fun delete(id: Long)
+
+    @Query(
+        "SELECT p.id AS id, p.name AS name, COUNT(i.mediaId) AS count, " +
+            "(SELECT m.thumbnailPath FROM playlist_items pi INNER JOIN media_items m ON m.id = pi.mediaId " +
+            "WHERE pi.playlistId = p.id AND m.thumbnailPath IS NOT NULL AND m.thumbnailPath != '' ORDER BY pi.position LIMIT 1) AS cover " +
+            "FROM playlists p LEFT JOIN playlist_items i ON i.playlistId = p.id GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
+    )
+    fun observeSummaries(): Flow<List<PlaylistSummary>>
+
+    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_items WHERE playlistId = :playlistId")
+    suspend fun nextPosition(playlistId: Long): Int
+
+    /** Returns -1 when the item is already in the playlist. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertItem(item: PlaylistItemEntity): Long
+
+    @Query("DELETE FROM playlist_items WHERE playlistId = :playlistId AND mediaId = :mediaId")
+    suspend fun removeItem(playlistId: Long, mediaId: Long)
+
+    @Query("UPDATE playlist_items SET position = :position WHERE playlistId = :playlistId AND mediaId = :mediaId")
+    suspend fun setPosition(playlistId: Long, mediaId: Long, position: Int)
+
+    @Query("UPDATE playlists SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String)
 }

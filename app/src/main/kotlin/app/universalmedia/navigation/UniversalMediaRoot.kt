@@ -131,6 +131,7 @@ fun UniversalMediaRoot(
         factory = LibraryViewModel.factory(
             context.applicationContext as Application,
             container.database.mediaItemDao(),
+            container.database.playlistDao(),
         ),
     )
 
@@ -343,6 +344,22 @@ fun UniversalMediaRoot(
                                     startPositionMs = item.playbackPositionMs,
                                 ),
                             )
+                        },
+                        onPlayList = { name, items, start ->
+                            playback.playQueue(
+                                name,
+                                items.mapIndexed { i, item ->
+                                    PlayRequest(
+                                        uri = item.uri,
+                                        title = item.title,
+                                        mimeType = item.mimeType,
+                                        libraryItemId = item.id,
+                                        startPositionMs = if (i == start) item.playbackPositionMs else 0,
+                                    )
+                                },
+                                start,
+                            )
+                            navController.navigateTopLevel(TopDestination.PLAYER.route)
                         },
                     )
                 }

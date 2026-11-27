@@ -115,3 +115,11 @@ data class PlaylistItemEntity(
     val mediaId: Long,
     val position: Int,
 )
+
+/** A playlist with its size and a preview image (not a table; filled by a query). */
+data class PlaylistSummary(
+    val id: Long,
+    val name: String,
+    val count: Int,
+    val cover: String?,
+)

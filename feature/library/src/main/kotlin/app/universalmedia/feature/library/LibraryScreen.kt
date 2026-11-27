@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.SwapVert
@@ -75,7 +77,12 @@ import androidx.compose.foundation.layout.size
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPlay: (MediaItemEntity) -> Unit = {}) {
+fun LibraryScreen(
+    viewModel: LibraryViewModel,
+    onOpenSettings: () -> Unit,
+    onPlay: (MediaItemEntity) -> Unit = {},
+    onPlayList: (name: String, items: List<MediaItemEntity>, startIndex: Int) -> Unit = { _, _, _ -> },
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -94,6 +101,11 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
         }
     }
     var renaming by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var showPlaylists by rememberSaveable { mutableStateOf(false) }
+    var openPlaylist by remember { mutableStateOf<app.universalmedia.core.database.PlaylistSummary?>(null) }
+    var addingToPlaylist by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var newPlaylist by remember { mutableStateOf(false) }
+    val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var deleting by remember { mutableStateOf<MediaItemEntity?>(null) }
 
     LaunchedEffect(message) {
@@ -164,9 +176,27 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                SortChip(state.sort, viewModel::setSort)
-                LibraryFilter.entries.forEach { f ->
-                    FilterChip(selected = state.filter == f, onClick = { viewModel.setFilter(f) }, label = { Text(f.label) })
+                FilterChip(selected = showPlaylists, onClick = { showPlaylists = !showPlaylists }, label = { Text("Playlists") })
+                if (!showPlaylists) {
+                    SortChip(state.sort, viewModel::setSort)
+                    LibraryFilter.entries.forEach { f ->
+                        FilterChip(selected = state.filter == f, onClick = { viewModel.setFilter(f) }, label = { Text(f.label) })
+                    }
+                }
+            }
+
+            if (showPlaylists) {
+                PlaylistList(playlists, onNew = { newPlaylist = true }, onOpen = { openPlaylist = it })
+                return@Column
+            }
+            if (state.items.size > 1) {
+                androidx.compose.material3.TextButton(
+                    onClick = { onPlayList(if (state.filter == LibraryFilter.ALL) "Library" else state.filter.label, state.items, 0) },
+                    modifier = Modifier.padding(start = 8.dp),
+                ) {
+                    Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Play all ${state.items.size}")
                 }
             }
 
@@ -191,6 +221,7 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
                             onRename = { renaming = item },
                             onShare = { shareFile(context, item) },
                             onDelete = { deleting = item },
+                            onAddToPlaylist = { addingToPlaylist = item },
                         )
                     }
                 }
@@ -200,6 +231,18 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
 
     renaming?.let { item -> RenameDialog(item, onRename = { viewModel.rename(item, it) }, onDismiss = { renaming = null }) }
     deleting?.let { item -> DeleteDialog(item, onDelete = { viewModel.deleteFile(item) }, onDismiss = { deleting = null }) }
+    addingToPlaylist?.let { item -> AddToPlaylistSheet(item, viewModel, onDismiss = { addingToPlaylist = null }) }
+    openPlaylist?.let { p ->
+        PlaylistSheet(
+            playlist = p,
+            viewModel = viewModel,
+            onPlay = { items, index -> openPlaylist = null; onPlayList(p.name, items, index) },
+            onDismiss = { openPlaylist = null },
+        )
+    }
+    if (newPlaylist) {
+        NameDialog("New playlist", "Create", initial = "", onDone = { viewModel.createPlaylist(it) }, onDismiss = { newPlaylist = false })
+    }
 }
 
 @Composable
@@ -273,6 +316,7 @@ private fun MediaRow(
     onRename: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     val isAudio = item.mimeType?.startsWith("audio") == true
     var menu by remember { mutableStateOf(false) }
@@ -308,6 +352,7 @@ private fun MediaRow(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Add to playlist…") }, onClick = { menu = false; onAddToPlaylist() })
                 DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
                 DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; onShare() })
                 DropdownMenuItem(text = { Text("Open with…") }, onClick = { menu = false; onOpen() })

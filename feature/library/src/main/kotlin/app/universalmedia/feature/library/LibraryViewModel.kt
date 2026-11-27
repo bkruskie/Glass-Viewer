@@ -12,6 +12,11 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.universalmedia.core.database.MediaItemDao
 import app.universalmedia.core.database.MediaItemEntity
+import app.universalmedia.core.database.PlaylistDao
+import app.universalmedia.core.database.PlaylistEntity
+import app.universalmedia.core.database.PlaylistItemEntity
+import app.universalmedia.core.database.PlaylistSummary
+import kotlinx.coroutines.flow.Flow
 import app.universalmedia.media.download.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +46,49 @@ data class LibraryUiState(
 class LibraryViewModel(
     private val app: Application,
     private val dao: MediaItemDao,
+    private val playlistDao: PlaylistDao,
 ) : ViewModel() {
+
+    val playlists: StateFlow<List<PlaylistSummary>> = playlistDao.observeSummaries()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun playlistItems(id: Long): Flow<List<MediaItemEntity>> = playlistDao.observeItems(id)
+
+    /** Creates a playlist (and adds [first] to it, if given). */
+    fun createPlaylist(name: String, first: MediaItemEntity? = null) {
+        val clean = name.trim().ifEmpty { return }
+        viewModelScope.launch {
+            val id = playlistDao.insert(PlaylistEntity(name = clean, createdAt = System.currentTimeMillis()))
+            if (first != null) addTo(id, clean, first) else _message.value = "Created “$clean”"
+        }
+    }
+
+    fun addToPlaylist(playlist: PlaylistSummary, item: MediaItemEntity) {
+        viewModelScope.launch { addTo(playlist.id, playlist.name, item) }
+    }
+
+    private suspend fun addTo(playlistId: Long, name: String, item: MediaItemEntity) {
+        val added = playlistDao.insertItem(PlaylistItemEntity(playlistId, item.id, playlistDao.nextPosition(playlistId))) != -1L
+        _message.value = if (added) "Added to “$name”" else "Already in “$name”"
+    }
+
+    fun removeFromPlaylist(playlistId: Long, item: MediaItemEntity) {
+        viewModelScope.launch { playlistDao.removeItem(playlistId, item.id) }
+    }
+
+    /** Saves a new order after moving an item up or down. */
+    fun reorder(playlistId: Long, ordered: List<MediaItemEntity>) {
+        viewModelScope.launch { ordered.forEachIndexed { i, m -> playlistDao.setPosition(playlistId, m.id, i) } }
+    }
+
+    fun renamePlaylist(id: Long, name: String) {
+        val clean = name.trim().ifEmpty { return }
+        viewModelScope.launch { playlistDao.rename(id, clean) }
+    }
+
+    fun deletePlaylist(id: Long) {
+        viewModelScope.launch { playlistDao.delete(id) }
+    }
 
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(LibraryFilter.ALL)
@@ -238,8 +285,8 @@ class LibraryViewModel(
     }
 
     companion object {
-        fun factory(app: Application, dao: MediaItemDao): ViewModelProvider.Factory = viewModelFactory {
-            initializer { LibraryViewModel(app, dao) }
+        fun factory(app: Application, dao: MediaItemDao, playlistDao: PlaylistDao): ViewModelProvider.Factory = viewModelFactory {
+            initializer { LibraryViewModel(app, dao, playlistDao) }
         }
     }
 }
