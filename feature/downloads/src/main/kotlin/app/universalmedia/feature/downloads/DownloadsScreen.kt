@@ -287,7 +287,13 @@ private fun technicalText(item: DownloadEntity): String = buildString {
     appendLine(item.title)
     appendLine("Status: ${item.status}" + (item.errorMessage?.let { " – $it" } ?: ""))
     item.variantLabel?.let { appendLine("Quality: $it") }
-    appendLine(item.info ?: "No details were recorded (downloaded with an older version).")
+    appendLine(
+        item.info ?: if (DownloadStatus.parse(item.status).isActive) {
+            "Details appear once the download starts and are completed when it finishes."
+        } else {
+            "No details were recorded (downloaded with an older version)."
+        },
+    )
 }.trim()
 
 private fun openFile(context: Context, item: DownloadEntity) {

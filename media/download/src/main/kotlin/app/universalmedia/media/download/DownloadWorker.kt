@@ -117,6 +117,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     resolveHlsTracks(http, url, job.mediaUrl, job.targetHeight, job.targetBitrate)
                 }
                 notes += tracks.notes
+                env.dao.setInfo(job.id, (notes + "Downloading…").joinToString("\n")) // visible while it runs
                 val videoUrl = tracks.video
                 val audioUrl = tracks.audio
                 if (audioUrl == null) {
