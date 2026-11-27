@@ -32,13 +32,14 @@ Videos protected by DRM (most paid streaming services) can't be saved; the app s
 - Swipe up/down on the left for brightness, on the right for volume. Double-tap the sides to skip 10 s.
 - **Pinch** to zoom, drag to move around a zoomed picture.
 - Toolbar: speed from **0.1× (super slow motion)** to 4×, frame-by-frame step, fit / fill / stretch, loop, and **snapshot** (saves the current frame to Pictures).
+- **Subtitles:** the subtitle button adds a .srt, .vtt, .ass or .ttml file; switch subtitles and audio tracks with the CC and settings buttons.
 - Turn the phone sideways for fullscreen; picture-in-picture when you leave the app.
 - Playlists: Previous / Next and **Up next** appear while a list plays.
 
 ## Library
 
 - Everything you download, plus files you add with **Add files**. Search, filter (video, audio, favorites) and **Sort**.
-- ⋮ on any item: **Add to playlist**, Rename, Share, Open with…, Remove from library (file stays), **Delete from phone** (asks first).
+- ⋮ on any item: **Add to playlist**, Rename, **Details** (resolution, codecs, bitrate, where it's saved), Share, Open with…, Remove from library (file stays), **Delete from phone** (asks first).
 - **Playlists** chip: create playlists, reorder, Play all or Shuffle. **Play all** plays whatever list you are looking at.
 
 ## Connect: TVs
