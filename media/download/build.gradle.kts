@@ -22,8 +22,6 @@ dependencies {
     api(libs.androidx.work.runtime)
 
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.media3.transformer)
-    implementation(libs.androidx.media3.common)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

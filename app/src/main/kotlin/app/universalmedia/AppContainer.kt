@@ -103,6 +103,7 @@ class UniversalMediaApp : Application(), DownloadEnvironmentProvider {
 
     override fun onCreate() {
         super.onCreate()
+        CrashReporter.install(this)
         container = AppContainer(this)
         container.appScope.launch { runCatching { container.downloads.restoreQueue() } }
     }

@@ -63,6 +63,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.universalmedia.AppContainer
+import app.universalmedia.CrashReporter
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import app.universalmedia.BuildConfig
 import app.universalmedia.feature.browser.BrowserScreen
 import app.universalmedia.feature.browser.BrowserViewModel
@@ -281,6 +284,40 @@ fun UniversalMediaRoot(
             }
         }
         FullscreenVideoHost(webViewPool)
+    }
+
+    // Offer the report from a previous crash (stored on this device only).
+    var crashReport by remember { mutableStateOf(CrashReporter.lastCrash(context)) }
+    crashReport?.let { report ->
+        val clipboard = LocalClipboardManager.current
+        AlertDialog(
+            onDismissRequest = {
+                CrashReporter.clear(context)
+                crashReport = null
+            },
+            title = { Text("The app closed unexpectedly") },
+            text = {
+                Text(
+                    "Universal Media stopped last time. You can copy the technical details and send them " +
+                        "to whoever maintains the app. Nothing has been sent anywhere.\n\n" +
+                        report.lineSequence().take(8).joinToString("\n"),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(report))
+                    Toast.makeText(context, "Details copied", Toast.LENGTH_SHORT).show()
+                    CrashReporter.clear(context)
+                    crashReport = null
+                }) { Text("Copy details") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    CrashReporter.clear(context)
+                    crashReport = null
+                }) { Text("Dismiss") }
+            },
+        )
     }
 
     duplicate?.let { (media, variant) ->

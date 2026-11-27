@@ -90,7 +90,11 @@ internal object TrackMuxer {
                 val source = sources[next]
                 val ex = source.extractor
                 buffer.clear()
-                val size = ex.readSampleData(buffer, 0)
+                val size = try {
+                    ex.readSampleData(buffer, 0)
+                } catch (e: IllegalArgumentException) {
+                    throw DownloadException("A video frame was too large to package.")
+                }
                 if (size < 0) {
                     finished[next] = true
                     continue
@@ -103,7 +107,11 @@ internal object TrackMuxer {
                 }
                 ex.advance()
             }
-            m.stop()
+            try {
+                m.stop()
+            } catch (e: IllegalStateException) {
+                throw DownloadException("The downloaded stream couldn't be packaged.")
+            }
             val mime = when {
                 webm && hasVideo -> "video/webm"
                 webm -> "audio/webm"

@@ -21,6 +21,7 @@ import app.universalmedia.media.detection.DashSegmentPlan
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -59,6 +60,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             return fail(id, "Network problem: ${e.message ?: "connection lost"}", retryable = true)
         } catch (e: SecurityException) {
             return fail(id, "Storage permission was denied.", retryable = false)
+        } catch (e: Exception) {
+            // Anything unexpected fails this download only; it must never take the app down.
+            return fail(id, "Unexpected error: ${e.javaClass.simpleName}${e.message?.let { ": $it" } ?: ""}", retryable = false)
         } finally {
             withContext(NonCancellable) { DownloadGate.release() }
         }
@@ -112,15 +116,18 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                         mime = if (job.audioOnly) "audio/mp4" else "video/mp4"
                         extension = if (job.audioOnly) "m4a" else "mp4"
                     } else {
+                        // Repackage MPEG-TS as MP4 (no re-encoding); keep the .ts if this phone can't.
                         showProgress(job.title, part.length(), part.length(), "Finishing…")
-                        val mp4 = File(dir, "${job.id}.mp4")
-                        if (remuxToMp4(ctx, part, mp4) && mp4.length() > 0) {
+                        val mp4 = withContext(Dispatchers.IO) {
+                            runCatching { TrackMuxer.mux(listOf(part), dir, "${job.id}.out") }.getOrNull()
+                        }
+                        if (mp4 != null && mp4.file.length() > 0) {
                             part.delete()
-                            finished = mp4
-                            mime = "video/mp4"
-                            extension = "mp4"
+                            finished = mp4.file
+                            mime = mp4.mimeType
+                            extension = mp4.extension
                         } else {
-                            mp4.delete()
+                            File(dir, "${job.id}.out.mp4").delete()
                             finished = part
                             mime = "video/mp2t"
                             extension = "ts"
@@ -132,7 +139,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     val urls = listOf(videoUrl, audioUrl)
                     phases(files) { i, file, state -> HlsDownloader(http).download(urls[i], file, state, progressFor(i)) }
                     showProgress(job.title, bytesBeforePhase, bytesBeforePhase, "Finishing…")
-                    val out = TrackMuxer.mux(files, dir, "${job.id}.out")
+                    val out = withContext(Dispatchers.IO) { TrackMuxer.mux(files, dir, "${job.id}.out") }
                     files.forEach { it.delete() }
                     finished = out.file
                     mime = out.mimeType
@@ -163,7 +170,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     }
                 }
                 showProgress(job.title, bytesBeforePhase, bytesBeforePhase, "Finishing…")
-                val out = TrackMuxer.mux(files, dir, "${job.id}.out")
+                val out = withContext(Dispatchers.IO) { TrackMuxer.mux(files, dir, "${job.id}.out") }
                 files.forEach { it.delete() }
                 finished = out.file
                 mime = out.mimeType

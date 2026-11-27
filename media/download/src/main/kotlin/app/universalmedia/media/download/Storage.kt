@@ -6,21 +6,11 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
-import androidx.media3.common.MediaItem
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.transformer.Composition
-import androidx.media3.transformer.ExportException
-import androidx.media3.transformer.ExportResult
-import androidx.media3.transformer.Transformer
 import java.io.File
-import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Moves finished files to where the user can find them. */
@@ -107,34 +97,6 @@ internal class DownloadStorage(private val context: Context) {
             null
         } finally {
             runCatching { retriever.release() }
-        }
-    }
-}
-
-/**
- * Repackages an MPEG-TS file as MP4 without re-encoding, using Media3 Transformer.
- * Returns false if the streams can't be transmuxed; the caller then keeps the .ts.
- */
-@androidx.annotation.OptIn(markerClass = [UnstableApi::class])
-internal suspend fun remuxToMp4(context: Context, input: File, output: File): Boolean = withContext(Dispatchers.Main) {
-    suspendCancellableCoroutine { cont ->
-        val transformer = Transformer.Builder(context)
-            .addListener(object : Transformer.Listener {
-                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                    if (cont.isActive) cont.resume(true)
-                }
-
-                override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                    if (cont.isActive) cont.resume(false)
-                }
-            })
-            .build()
-        val main = Handler(Looper.getMainLooper())
-        cont.invokeOnCancellation { main.post { runCatching { transformer.cancel() } } }
-        try {
-            transformer.start(MediaItem.fromUri(Uri.fromFile(input)), output.absolutePath)
-        } catch (e: Exception) {
-            if (cont.isActive) cont.resume(false)
         }
     }
 }

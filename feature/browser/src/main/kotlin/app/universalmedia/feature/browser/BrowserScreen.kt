@@ -7,6 +7,7 @@ import android.widget.Toast
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Color as AndroidColor
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
@@ -79,6 +80,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -151,8 +154,10 @@ fun BrowserScreen(
     }
 
     Column(modifier.fillMaxSize()) {
+        // Toolbar is drawn above the page (zIndex) so web content can never cover it.
         Row(
             Modifier
+                .zIndex(2f)
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .statusBarsPadding()
@@ -183,7 +188,7 @@ fun BrowserScreen(
             )
         }
 
-        Box(Modifier.fillMaxWidth().height(2.dp)) {
+        Box(Modifier.zIndex(2f).fillMaxWidth().height(2.dp)) {
             if (tab.isLoading) {
                 LinearProgressIndicator(
                     progress = { tab.progress / 100f },
@@ -194,11 +199,15 @@ fun BrowserScreen(
             }
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
             key(tab.id) {
                 AndroidView(
                     factory = { webView.apply { (parent as? ViewGroup)?.removeView(this) } },
-                    modifier = Modifier.fillMaxSize(),
+                    update = { view ->
+                        // Behind the start page the WebView has nothing to show; keep it from drawing at all.
+                        view.visibility = if (tab.isStartPage) View.INVISIBLE else View.VISIBLE
+                    },
+                    modifier = Modifier.fillMaxSize().clipToBounds(),
                 )
             }
             if (tab.isStartPage) {
