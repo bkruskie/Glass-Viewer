@@ -1,6 +1,6 @@
 # Universal Media: Architecture & Technical Plan
 
-Status: Milestones 1 (Foundation) and 2 (Media detection) implemented. Version `0.2.0-m2`.
+Status: Milestones 1–3 implemented, Milestone 4 (player) largely implemented. Version `0.4.0`.
 
 This document covers the full architecture for every planned subsystem, the feasibility limits Android sets, and the plan for each milestone. Decisions are recorded as ADRs at the end.
 
@@ -367,8 +367,8 @@ Discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-dig
 |---|---|---|---|
 | 1 | Foundation | ✅ Done | Multi-module build, theme, navigation, settings, database, browser with tabs/history/bookmarks, share intent, library import, detection engine core with tests |
 | 2 | Media detection | ✅ Done | OkHttp `ManifestFetcher` with page cookies; quality lists for HLS/DASH; AUTH_REQUIRED handling; clipboard chip; share flow shows a detection card immediately; MutationObserver probe for late players; first site adapters for open platforms (e.g. Vimeo, Internet Archive, PeerTube) |
-| 3 | Download engine | Next | WorkManager + foreground service; progressive with Range resume; HLS/DASH segment download → Media3 remux to MP4; queue, pause/resume/retry, Wi-Fi-only, concurrency limit; SAF destination; duplicate detection; auto-add to library |
-| 4 | Media player | | Media3 player: local + online, subtitles, audio tracks, speed, gestures, PiP, background audio via `MediaSessionService`, resume position |
+| 3 | Download engine | ✅ Done (progressive, HLS incl. AES-128 and separate audio, DASH; MediaExtractor+MediaMuxer join) | WorkManager + foreground service; progressive with Range resume; HLS/DASH segment download → Media3 remux to MP4; queue, pause/resume/retry, Wi-Fi-only, concurrency limit; SAF destination; duplicate detection; auto-add to library |
+| 4 | Media player | ✅ Mostly done: Media3 player with speed/subtitles/tracks, fullscreen, PiP, resume. Remaining: background audio service, swipe gestures | Media3 player: local + online, subtitles, audio tracks, speed, gestures, PiP, background audio via `MediaSessionService`, resume position |
 | 5 | Casting | | Local server; Google Cast (`full` flavor); DLNA discovery + control; web receiver; remote controls in a notification |
 | 6 | Screen mirroring | | Companion receiver app (Android TV/Fire TV); browser receiver; adaptive bitrate; connection quality |
 | 7 | Ecosystem | | LAN transfer with pairing; browser upload page for computers; Firefox add-on; more adapters; playlists UI |

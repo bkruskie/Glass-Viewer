@@ -2,7 +2,7 @@
 
 A free, private, all-in-one media app for Android: browse, detect, download, play, cast, mirror and transfer video and audio. No accounts, no ads, no cloud.
 
-**Current version:** `0.2.0-m2`, Milestone 2 (Media detection). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
+**Current version:** `0.4.0`: downloads and the built-in player. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
 
 ## What works in this build
 
@@ -12,7 +12,9 @@ A free, private, all-in-one media app for Android: browse, detect, download, pla
 - **Share to Universal Media** from any app, open web links with it, or tap "Open copied link". Shared links are analysed right away.
 - **Library**: add videos and music from your phone, search, filter, favourites. Files stay where they are.
 - **Settings**: detection, search engine, JavaScript, cookies, download preferences, pure-black theme, clear browsing data.
-- Downloads, Player and Connect screens are in place for the next milestones.
+- **Downloads**: MP4, WebM, MKV, audio, HLS (incl. standard encryption and separate audio) and DASH; pause, resume, retry, Wi-Fi only; saved to Movies/Music › Universal Media or a folder you choose, and added to the library.
+- **Built-in player**: plays everything above, with speed, subtitles, audio tracks, fullscreen, picture-in-picture and resume.
+- Connect (casting, mirroring, transfer) is next.
 
 ## Build
 
