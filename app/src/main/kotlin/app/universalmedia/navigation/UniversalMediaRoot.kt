@@ -6,6 +6,17 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.NavigationRailItemDefaults
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.universalmedia.core.database.DownloadEntity
 import app.universalmedia.core.model.DownloadStatus
@@ -163,7 +174,14 @@ fun UniversalMediaRoot(
         if (playerFullscreen) {
             controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller?.hide(WindowInsetsCompat.Type.systemBars())
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            // Fullscreen follows the video: wide videos landscape, vertical videos portrait.
+            val size = playback.player.videoSize
+            activity?.requestedOrientation = when {
+                size.width <= 0 || size.height <= 0 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                size.width * size.pixelWidthHeightRatio >= size.height * 1.1f -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                size.height >= size.width * size.pixelWidthHeightRatio * 1.1f -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
         }
         onDispose {
             if (playerFullscreen) {
@@ -204,13 +222,16 @@ fun UniversalMediaRoot(
     val showBottomBar = destination?.route != SETTINGS_ROUTE && webViewPool.fullscreen == null &&
         !playerFullscreen && !inPictureInPicture
     val openSettings = { navController.navigate(SETTINGS_ROUTE) { launchSingleTop = true } }
+    // Landscape phones and wide screens: tabs move to a side rail so content keeps its height.
+    val configuration = LocalConfiguration.current
+    val useRail = configuration.screenWidthDp > configuration.screenHeightDp && configuration.screenWidthDp >= 600
 
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0),
             containerColor = MaterialTheme.colorScheme.background,
             bottomBar = {
-                if (showBottomBar) {
+                if (showBottomBar && !useRail) {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                         TopDestination.entries.forEach { item ->
                             val selected = destination?.hierarchy?.any { it.route == item.route } == true
@@ -228,10 +249,39 @@ fun UniversalMediaRoot(
                 }
             },
         ) { padding ->
+          Row(Modifier.fillMaxSize().padding(padding)) {
+            if (showBottomBar && useRail) {
+                NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Spacer(Modifier.weight(1f))
+                    TopDestination.entries.forEach { item ->
+                        NavigationRailItem(
+                            selected = destination?.hierarchy?.any { it.route == item.route } == true,
+                            onClick = { navController.navigateTopLevel(item.route) },
+                            icon = { Icon(item.icon, contentDescription = null) },
+                            label = { Text(item.label) },
+                            colors = NavigationRailItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
+            }
             NavHost(
                 navController = navController,
                 startDestination = TopDestination.BROWSER.route,
-                modifier = Modifier.padding(padding),
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (useRail && showBottomBar) {
+                            // Keep content clear of a navigation bar or camera cutout on the far side.
+                            Modifier.windowInsetsPadding(
+                                WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.End),
+                            )
+                        } else {
+                            Modifier
+                        },
+                    ),
                 enterTransition = { fadeIn(tween(160)) },
                 exitTransition = { fadeOut(tween(160)) },
             ) {
@@ -322,6 +372,7 @@ fun UniversalMediaRoot(
                     )
                 }
             }
+          }
         }
         FullscreenVideoHost(webViewPool)
     }

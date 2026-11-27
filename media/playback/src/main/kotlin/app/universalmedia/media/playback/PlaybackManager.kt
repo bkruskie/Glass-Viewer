@@ -1,6 +1,10 @@
 package app.universalmedia.media.playback
 
+import android.content.ComponentName
 import android.content.Context
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -64,6 +68,15 @@ class PlaybackManager(
 ) {
     private var exo: ExoPlayer? = null
     private var watchdog: Job? = null
+    private var sessionConnection: ListenableFuture<MediaController>? = null
+
+    /** Connecting to PlaybackService starts it, so playback keeps going in the background with controls. */
+    private fun connectSession() {
+        if (sessionConnection != null) return
+        sessionConnection = runCatching {
+            MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
+        }.getOrNull()
+    }
     private val _current = MutableStateFlow<PlayRequest?>(null)
 
     /** The item loaded in the player, or null when nothing is. */
@@ -101,6 +114,7 @@ class PlaybackManager(
         }
         _current.value = request
         startWatchdog()
+        connectSession()
         request.libraryItemId?.let { id ->
             scope.launch { mediaItemDao.updatePlayback(id, request.startPositionMs, System.currentTimeMillis()) }
         }
@@ -179,6 +193,8 @@ class PlaybackManager(
     fun isPlayingVideo(): Boolean = exo?.let { it.isPlaying && it.videoSize.width > 0 } ?: false
 
     fun release() {
+        sessionConnection?.let { MediaController.releaseFuture(it) }
+        sessionConnection = null
         savePosition()
         exo?.release()
         exo = null

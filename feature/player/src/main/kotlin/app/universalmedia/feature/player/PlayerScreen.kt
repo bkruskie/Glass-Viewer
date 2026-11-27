@@ -4,7 +4,14 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.content.res.Configuration
 import android.view.ViewGroup
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import android.widget.Toast
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.platform.LocalContext
@@ -103,6 +110,26 @@ fun PlayerScreen(
     }
     BackHandler(enabled = fullscreen) { onFullscreenChange(false) }
 
+    // Follow the video's real shape (vertical videos are common).
+    var videoAspect by remember { mutableFloatStateOf(playback.player.videoSize.aspect()) }
+    DisposableEffect(playback) {
+        val listener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                videoAspect = videoSize.aspect()
+            }
+        }
+        playback.player.addListener(listener)
+        onDispose { playback.player.removeListener(listener) }
+    }
+
+    // Turning the phone sideways while a wide video plays goes fullscreen.
+    val orientation = LocalConfiguration.current.orientation
+    LaunchedEffect(orientation) {
+        if (orientation == Configuration.ORIENTATION_LANDSCAPE && current != null && videoAspect > 1.1f && !fullscreen) {
+            onFullscreenChange(true)
+        }
+    }
+
     if (current != null && (fullscreen || inPictureInPicture)) {
         VideoSurface(
             playback = playback,
@@ -152,7 +179,8 @@ fun PlayerScreen(
                     modifier = Modifier
                         .statusBarsPadding()
                         .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
+                        .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.6f).dp)
+                        .aspectRatio(videoAspect.coerceAtLeast(0.3f), matchHeightConstraintsFirst = videoAspect < 1f)
                         .background(Color.Black),
                 )
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -240,6 +268,10 @@ private fun openElsewhere(context: Context, request: PlayRequest) {
         Toast.makeText(context, "No other app can open this", Toast.LENGTH_SHORT).show()
     }
 }
+
+/** Display aspect ratio (width ÷ height, pixel shape included); 16:9 until the size is known. */
+private fun VideoSize.aspect(): Float =
+    if (width > 0 && height > 0) width * pixelWidthHeightRatio / height else 16f / 9f
 
 @Composable
 private fun RecentRow(item: MediaItemEntity, onClick: () -> Unit) {

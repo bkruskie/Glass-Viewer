@@ -15,6 +15,7 @@ import app.universalmedia.media.download.DownloadEnvironment
 import app.universalmedia.media.download.DownloadEnvironmentProvider
 import app.universalmedia.media.download.MediaDownloadManager
 import app.universalmedia.media.playback.PlaybackManager
+import app.universalmedia.media.playback.PlaybackHost
 import app.universalmedia.media.cast.CastManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -98,12 +99,15 @@ class AppContainer(private val application: Application) {
     }
 }
 
-class UniversalMediaApp : Application(), DownloadEnvironmentProvider {
+class UniversalMediaApp : Application(), DownloadEnvironmentProvider, PlaybackHost {
     lateinit var container: AppContainer
         private set
 
     override val downloadEnvironment: DownloadEnvironment
         get() = container.downloadEnvironment
+
+    override val playback: PlaybackManager
+        get() = container.playback
 
     override fun onCreate() {
         super.onCreate()
