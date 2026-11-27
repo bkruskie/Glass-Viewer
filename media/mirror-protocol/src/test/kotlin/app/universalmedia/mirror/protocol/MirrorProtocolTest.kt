@@ -39,4 +39,22 @@ class MirrorProtocolTest {
     fun rejectsForeignStreams() {
         MirrorProtocol.readGreeting(DataInputStream(ByteArrayInputStream("GET / HTTP/1.1".toByteArray())))
     }
+
+    @Test
+    fun skipsUnknownPacketTypesAndRoundTripsAudioConfig() {
+        val bytes = ByteArrayOutputStream()
+        DataOutputStream(bytes).use { out ->
+            // A packet type from a future sender.
+            out.writeByte(77); out.writeLong(1); out.writeInt(3); out.write(byteArrayOf(1, 2, 3))
+            MirrorProtocol.write(out, Packet(PacketType.AUDIO_CONFIG, 0, MirrorProtocol.audioConfigPayload(48_000, 2, byteArrayOf(0x11, 0x90.toByte()))))
+        }
+        val input = DataInputStream(ByteArrayInputStream(bytes.toByteArray()))
+        val packet = MirrorProtocol.read(input)!!
+        assertEquals(PacketType.AUDIO_CONFIG, packet.type)
+        val config = MirrorProtocol.parseAudioConfig(packet.payload)
+        assertEquals(48_000, config.sampleRate)
+        assertEquals(2, config.channels)
+        assertArrayEquals(byteArrayOf(0x11, 0x90.toByte()), config.asc)
+        assertNull(MirrorProtocol.read(input))
+    }
 }

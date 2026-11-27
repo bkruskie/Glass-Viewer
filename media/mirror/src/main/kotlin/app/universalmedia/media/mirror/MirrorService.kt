@@ -37,6 +37,8 @@ data class MirrorTarget(
     val kind: Kind,
     val host: String? = null,
     val port: Int = 0,
+    /** The receiver plays sound (receiver app 1.1+). */
+    val audio: Boolean = false,
 ) {
     enum class Kind { RECEIVER_APP, WEB_BROWSER }
 
@@ -49,7 +51,9 @@ sealed interface MirrorStatus {
     data object Idle : MirrorStatus
     data class Starting(val target: MirrorTarget) : MirrorStatus
     /** [address] is set for browser mirroring: the page to open on the TV. */
-    data class Active(val target: MirrorTarget, val address: String?) : MirrorStatus
+    data class Active(val target: MirrorTarget, val address: String?, val sound: Sound = Sound.NONE) : MirrorStatus
+
+    enum class Sound { NONE, ON, RECEIVER_TOO_OLD, ANDROID_TOO_OLD, NO_PERMISSION, UNAVAILABLE }
     data class Failed(val message: String) : MirrorStatus
 }
 
@@ -69,6 +73,7 @@ class MirrorService : Service() {
     private var projection: MediaProjection? = null
     private var display: VirtualDisplay? = null
     private var output: MirrorOutput? = null
+    private var audio: Any? = null // AudioCapture on Android 10+
     private var size: Pair<Int, Int> = 0 to 0
     private var target: MirrorTarget? = null
     private val main = Handler(Looper.getMainLooper())
@@ -93,7 +98,13 @@ class MirrorService : Service() {
         // Must be in the foreground (typed mediaProjection) before using the permission.
         ServiceCompat.startForeground(
             this, NOTIFICATION_ID, notification(chosen.name),
-            if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0,
+            when {
+                Build.VERSION.SDK_INT < 29 -> 0
+                // Capturing app sound counts as recording on Android 11+, so it needs the microphone type too.
+                Build.VERSION.SDK_INT >= 30 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                else -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            },
         )
         if (data == null || resultCode != Activity.RESULT_OK) {
             stopMirroring("Screen capture wasn't allowed.")
@@ -125,8 +136,9 @@ class MirrorService : Service() {
         size = w to h
         val failure: (String) -> Unit = { message -> main.post { stopMirroring(message) } }
         val out = when (chosen.kind) {
-            MirrorTarget.Kind.RECEIVER_APP -> H264Output(chosen.host.orEmpty(), chosen.port, w, h, failure).also {
-                MirrorState.mutable.value = MirrorStatus.Active(chosen, null)
+            MirrorTarget.Kind.RECEIVER_APP -> H264Output(chosen.host.orEmpty(), chosen.port, w, h, failure).also { video ->
+                val sound = startAudio(chosen, p, video)
+                MirrorState.mutable.value = MirrorStatus.Active(chosen, null, sound)
             }
             MirrorTarget.Kind.WEB_BROWSER -> MjpegOutput(
                 w, h,
@@ -177,7 +189,22 @@ class MirrorService : Service() {
         return round16(rw * scale) to round16(rh * scale)
     }
 
+    /** Starts sending sound when the receiver plays it and Android allows it; returns what the user should know. */
+    private fun startAudio(chosen: MirrorTarget, p: MediaProjection, video: H264Output): MirrorStatus.Sound {
+        if (!chosen.audio) return MirrorStatus.Sound.RECEIVER_TOO_OLD
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return MirrorStatus.Sound.ANDROID_TOO_OLD
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return MirrorStatus.Sound.NO_PERMISSION
+        }
+        return runCatching {
+            audio = AudioCapture(p) { packet -> video.sendExtra(packet) }
+            MirrorStatus.Sound.ON
+        }.getOrDefault(MirrorStatus.Sound.UNAVAILABLE)
+    }
+
     private fun stopOutputs() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) (audio as? AudioCapture)?.stop()
+        audio = null
         runCatching { display?.release() }
         display = null
         runCatching { output?.stop() }

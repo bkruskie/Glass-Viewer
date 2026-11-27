@@ -131,6 +131,7 @@ class ReceiverActivity : Activity(), SurfaceHolder.Callback {
             serviceName = deviceName
             serviceType = MirrorProtocol.SERVICE_TYPE
             setPort(port)
+            setAttribute(MirrorProtocol.TXT_AUDIO, "1")
         }
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(info: NsdServiceInfo) {}
@@ -149,6 +150,7 @@ class ReceiverActivity : Activity(), SurfaceHolder.Callback {
     private fun receive(client: Socket) {
         var decoder: MediaCodec? = null
         var renderThread: Thread? = null
+        var audio: AudioPlayer? = null
         try {
             client.tcpNoDelay = true
             val input = DataInputStream(BufferedInputStream(client.getInputStream(), 512 * 1024))
@@ -176,6 +178,13 @@ class ReceiverActivity : Activity(), SurfaceHolder.Callback {
                     PacketType.VIDEO_FRAME, PacketType.VIDEO_KEY_FRAME -> decoder?.let {
                         queue(it, packet.payload, packet.timeUs, if (packet.type == PacketType.VIDEO_KEY_FRAME) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     }
+                    PacketType.AUDIO_CONFIG -> {
+                        audio?.release()
+                        audio = runCatching { AudioPlayer(MirrorProtocol.parseAudioConfig(packet.payload)) }.getOrNull()
+                    }
+                    PacketType.AUDIO_FRAME -> audio?.let { player ->
+                        runCatching { player.feed(packet.payload, packet.timeUs) }.onFailure { player.release(); audio = null }
+                    }
                     PacketType.BYE -> break
                 }
             }
@@ -184,6 +193,7 @@ class ReceiverActivity : Activity(), SurfaceHolder.Callback {
         } catch (e: IllegalStateException) {
             // decoder error; wait for the next phone
         } finally {
+            audio?.release()
             renderThread?.interrupt()
             decoder?.let { runCatching { it.stop() }; runCatching { it.release() } }
             runCatching { client.close() }

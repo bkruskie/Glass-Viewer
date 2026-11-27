@@ -81,6 +81,7 @@ class ReceiverDiscovery(context: Context) {
                             kind = MirrorTarget.Kind.RECEIVER_APP,
                             host = host,
                             port = serviceInfo.port,
+                            audio = serviceInfo.attributes[MirrorProtocol.TXT_AUDIO]?.decodeToString() == "1",
                         )
                         publish()
                     }

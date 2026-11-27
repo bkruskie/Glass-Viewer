@@ -60,7 +60,7 @@ While something plays on the TV, Connect shows a remote: play/pause, seek, ±10 
 
 ## Connect: mirror your whole screen
 
-- **Receiver app** on Android TV / Google TV / Fire TV: appears automatically; tap it.
+- **Receiver app** on Android TV / Google TV / Fire TV: appears automatically; tap it. With receiver 1.1+ and a phone on Android 10+, **sound plays on the TV** too (the app asks for audio permission once; it captures what apps play, never the microphone). Calls and some streaming apps don't allow their sound to be captured.
 - **Any browser:** choose the browser option and open the address shown (it ends in a short code) on the TV or computer.
 - **Smart View / Screen cast:** the phone's own mirroring (Samsung, Pixel and others), opened from the app. Works with most Samsung and Miracast TVs.
 - **HDMI:** a USB-C to HDMI adapter works on phones that support video output.

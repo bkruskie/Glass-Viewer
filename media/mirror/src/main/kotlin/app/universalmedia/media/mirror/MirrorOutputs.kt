@@ -126,8 +126,20 @@ internal class H264Output(
         }
     }
 
+    @Volatile private var lastAudioConfig: Packet? = null
+
+    /** Sends a packet that isn't video (sound). Silently dropped until connected. */
+    fun sendExtra(packet: Packet) {
+        try {
+            send(packet)
+        } catch (e: IOException) {
+            if (running.get()) onFailure("The TV disconnected.")
+        }
+    }
+
     private fun send(packet: Packet) {
         if (packet.type == PacketType.VIDEO_CONFIG) lastConfig = packet
+        if (packet.type == PacketType.AUDIO_CONFIG) lastAudioConfig = packet
         synchronized(lock) {
             if (!::out.isInitialized) return // not connected yet; frames before connecting are dropped
             MirrorProtocol.write(out, packet)
@@ -137,6 +149,7 @@ internal class H264Output(
 
     private fun requestKeyFrame() {
         lastConfig?.let { runCatching { send(it) } }
+        lastAudioConfig?.let { runCatching { send(it) } }
         runCatching { encoder?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }) }
     }
 

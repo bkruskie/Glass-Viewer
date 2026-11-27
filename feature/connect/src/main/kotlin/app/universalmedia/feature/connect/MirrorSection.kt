@@ -70,11 +70,27 @@ internal fun MirrorSection(discovery: ReceiverDiscovery) {
             MirrorService.start(context, target, result.resultCode, data)
         }
     }
-    fun mirrorTo(target: MirrorTarget) {
-        MirrorService.clearError()
+    fun askScreen(target: MirrorTarget) {
         val manager = context.getSystemService(MediaProjectionManager::class.java) ?: return
         pending = target
         consent.launch(manager.createScreenCaptureIntent())
+    }
+    // Sound needs the audio permission (Android 10+); without it, mirroring goes ahead silently.
+    var soundFor by remember { mutableStateOf<MirrorTarget?>(null) }
+    val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        soundFor?.let { askScreen(it) }
+        soundFor = null
+    }
+    fun mirrorTo(target: MirrorTarget) {
+        MirrorService.clearError()
+        val needsAudio = target.audio && android.os.Build.VERSION.SDK_INT >= 29 &&
+            context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (needsAudio) {
+            soundFor = target
+            audioPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+        } else {
+            askScreen(target)
+        }
     }
 
     SectionHeader("Mirror your screen")
@@ -89,7 +105,8 @@ internal fun MirrorSection(discovery: ReceiverDiscovery) {
         if (status !is MirrorStatus.Active) {
             receivers.forEach { receiver ->
                 FeatureCard(
-                    Icons.Rounded.Tv, receiver.name, "Receiver app · smooth, sharp picture",
+                    Icons.Rounded.Tv, receiver.name,
+                    if (receiver.audio) "Receiver app · sharp picture with sound" else "Receiver app · picture only (update the TV app for sound)",
                     onClick = { mirrorTo(receiver) },
                 )
             }
@@ -168,6 +185,17 @@ private fun ActiveMirror(status: MirrorStatus.Active) {
             Spacer(Modifier.padding(top = 8.dp))
             Text("On the TV's web browser, open:", style = MaterialTheme.typography.bodySmall)
             Text(address, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+        }
+        val soundNote = when (status.sound) {
+            MirrorStatus.Sound.ON -> "Sound plays on the TV. Some apps (calls, some streaming apps) don't allow it."
+            MirrorStatus.Sound.RECEIVER_TOO_OLD -> "No sound: install the latest UniversalMediaReceiver.apk on the TV."
+            MirrorStatus.Sound.ANDROID_TOO_OLD -> "No sound: sending sound needs Android 10 or newer on the phone."
+            MirrorStatus.Sound.NO_PERMISSION -> "No sound: allow audio for Universal Media in the phone's settings, then mirror again."
+            MirrorStatus.Sound.UNAVAILABLE -> "No sound: this phone didn't allow capturing app sound."
+            MirrorStatus.Sound.NONE -> null
+        }
+        soundNote?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
         }
         Text(
             "Everything on your screen is shown on the TV. Notifications too. Stop any time from here or the notification.",

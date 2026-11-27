@@ -16,6 +16,9 @@ import java.io.IOException
 object MirrorProtocol {
     /** DNS-SD service type the TV receiver advertises on the local network. */
     const val SERVICE_TYPE = "_umreceiver._tcp."
+
+    /** DNS-SD TXT key: "1" when the receiver plays mirrored sound (receiver v2+). */
+    const val TXT_AUDIO = "audio"
     const val VERSION: Byte = 1
     private val MAGIC = byteArrayOf('U'.code.toByte(), 'M'.code.toByte(), 'I'.code.toByte(), 'R'.code.toByte())
 
@@ -43,21 +46,45 @@ object MirrorProtocol {
         out.write(packet.payload)
     }
 
-    /** Reads the next packet, or null at a clean end of stream. */
+    /** Reads the next packet, or null at a clean end of stream. Unknown packet types are skipped. */
     fun read(input: DataInputStream): Packet? {
-        val code = input.read()
-        if (code < 0) return null
-        val type = PacketType.from(code) ?: throw IOException("Unknown packet type $code")
-        val time = input.readLong()
-        val length = input.readInt()
-        if (length < 0 || length > MAX_PAYLOAD) throw IOException("Bad packet length $length")
-        val payload = ByteArray(length)
-        try {
-            input.readFully(payload)
-        } catch (e: EOFException) {
-            return null
+        while (true) {
+            val code = input.read()
+            if (code < 0) return null
+            val time = input.readLong()
+            val length = input.readInt()
+            if (length < 0 || length > MAX_PAYLOAD) throw IOException("Bad packet length $length")
+            val payload = ByteArray(length)
+            try {
+                input.readFully(payload)
+            } catch (e: EOFException) {
+                return null
+            }
+            val type = PacketType.from(code) ?: continue // newer sender: ignore what we don't understand
+            return Packet(type, time, payload)
         }
-        return Packet(type, time, payload)
+    }
+
+    /** Audio config payload: sample rate, channel count, then the AAC AudioSpecificConfig. */
+    fun audioConfigPayload(sampleRate: Int, channels: Int, asc: ByteArray): ByteArray {
+        val buffer = java.io.ByteArrayOutputStream()
+        DataOutputStream(buffer).use {
+            it.writeInt(sampleRate)
+            it.writeInt(channels)
+            it.write(asc)
+        }
+        return buffer.toByteArray()
+    }
+
+    data class AudioConfig(val sampleRate: Int, val channels: Int, val asc: ByteArray)
+
+    fun parseAudioConfig(payload: ByteArray): AudioConfig {
+        if (payload.size < 8) throw IOException("Short audio config packet")
+        val input = DataInputStream(payload.inputStream())
+        val rate = input.readInt()
+        val channels = input.readInt()
+        if (rate !in 8_000..96_000 || channels !in 1..8) throw IOException("Bad audio config")
+        return AudioConfig(rate, channels, payload.copyOfRange(8, payload.size))
     }
 
     /** Config packet payload: width, height, then the codec config (SPS/PPS). */
@@ -87,6 +114,10 @@ enum class PacketType(val code: Int) {
     VIDEO_CONFIG(1),
     VIDEO_FRAME(2),
     VIDEO_KEY_FRAME(3),
+    /** AAC sample rate, channels and AudioSpecificConfig (receiver v2+). */
+    AUDIO_CONFIG(4),
+    /** One raw AAC frame. */
+    AUDIO_FRAME(5),
     /** The sender is stopping. */
     BYE(9);
 
