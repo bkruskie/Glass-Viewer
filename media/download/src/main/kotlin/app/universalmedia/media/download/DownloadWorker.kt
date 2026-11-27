@@ -129,24 +129,13 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                         mime = if (job.audioOnly) "audio/mp4" else "video/mp4"
                         extension = if (job.audioOnly) "m4a" else "mp4"
                     } else {
-                        // Repackage MPEG-TS as MP4 (no re-encoding); keep the .ts if this phone can't.
-                        showProgress(job.title, part.length(), part.length(), "Finishing…")
-                        val mp4 = withContext(Dispatchers.IO) {
-                            runCatching { TrackMuxer.mux(listOf(part), dir, "${job.id}.out") }
-                                .onFailure { notes += "MP4 conversion failed: ${it.message ?: it.javaClass.simpleName}; keeping .ts" }
-                                .getOrNull()
-                        }
-                        if (mp4 != null && mp4.file.length() > 0) {
-                            part.delete()
-                            finished = mp4.file
-                            mime = mp4.mimeType
-                            extension = mp4.extension
-                        } else {
-                            File(dir, "${job.id}.out.mp4").delete()
-                            finished = part
-                            mime = "video/mp2t"
-                            extension = "ts"
-                        }
+                        // Keep the stream exactly as the site sent it. MPEG-TS already carries picture and
+                        // sound together; rebuilding it as MP4 with Android's muxer damaged the audio and
+                        // frame timing on some streams. The built-in player, VLC and most TVs play .ts.
+                        finished = part
+                        mime = "video/mp2t"
+                        extension = "ts"
+                        notes += "Saved as the original MPEG-TS stream (no conversion)."
                     }
                 } else {
                     // Video and audio come as separate playlists: fetch both, then combine.
