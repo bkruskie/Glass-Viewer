@@ -123,6 +123,17 @@ interface MediaItemDao {
     @Query("UPDATE media_items SET title = :title WHERE id = :id")
     suspend fun rename(id: Long, title: String)
 
+    /** Library folder (a label for organising; the file itself doesn't move). Null = no folder. */
+    @Query("UPDATE media_items SET folder = :folder WHERE id = :id")
+    suspend fun setFolder(id: Long, folder: String?)
+
+    @Query("UPDATE media_items SET folder = :newName WHERE folder = :oldName")
+    suspend fun renameFolder(oldName: String, newName: String?)
+
+    /** After a file is moved to another place on the phone. */
+    @Query("UPDATE media_items SET uri = :uri WHERE id = :id")
+    suspend fun setUri(id: Long, uri: String)
+
     @Query("UPDATE media_items SET playbackPositionMs = :positionMs, lastPlayedAt = :playedAt WHERE id = :id")
     suspend fun updatePlayback(id: Long, positionMs: Long, playedAt: Long)
 
