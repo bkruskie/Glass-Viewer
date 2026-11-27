@@ -19,7 +19,8 @@ class CastException(message: String) : Exception(message)
 
 enum class CastKind { GOOGLE_CAST, DLNA, ROKU, TV_BROWSER }
 
-data class CastDevice(val id: String, val name: String, val kind: CastKind, val detail: String? = null)
+/** [address] is the TV's IP where the protocol needs it (Roku), so a cast never depends on a fresh scan. */
+data class CastDevice(val id: String, val name: String, val kind: CastKind, val detail: String? = null, val address: String? = null)
 
 /** Something to play on the TV. [uri] may be content:// (served by the phone) or http(s). */
 data class CastItem(val title: String, val uri: String, val mimeType: String?)
@@ -119,7 +120,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
             list += CastDevice(r.usn, r.friendlyName, CastKind.DLNA, listOfNotNull(r.manufacturer, r.modelName).joinToString(" ").ifBlank { null })
         }
         _networkTvs.value.filter { it.kind == NetworkTv.Kind.ROKU }.forEach { tv ->
-            list += CastDevice(tv.id, tv.name, CastKind.ROKU, listOfNotNull("Roku", tv.model, "· experimental").joinToString(" "))
+            list += CastDevice(tv.id, tv.name, CastKind.ROKU, listOfNotNull("Roku", tv.model, "· experimental").joinToString(" "), address = tv.host)
         }
         server.baseUrl.value?.let { base ->
             list += CastDevice("tv-browser", "Any TV with a web browser", CastKind.TV_BROWSER, "Open $base/tv on the TV")
@@ -136,11 +137,11 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                 val mime = item.mimeType?.substringBefore(';')?.ifBlank { null } ?: guessMime(item.uri)
                 val url = withContext(Dispatchers.IO) { reachableUrl(item, mime) }
                 when (device.kind) {
-                    CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.load(device.id, url, item.title, mime) }
-                    CastKind.DLNA -> {
-                        val renderer = dlnaRenderers.value[device.id] ?: throw CastException("That TV is no longer available.")
-                        dlna.load(renderer, url, item.title, mime)
+                    CastKind.GOOGLE_CAST -> {
+                        val routeId = googleRouteFor(device)
+                        withContext(Dispatchers.Main) { google.load(routeId, url, item.title, mime) }
                     }
+                    CastKind.DLNA -> dlna.load(rendererFor(device), url, item.title, mime)
                     CastKind.ROKU -> {
                         // Roku plays MPEG-TS only inside HLS, so wrap saved .ts files in a playlist.
                         val isTs = mime.contains("mp2t", true) || url.substringBefore('?').endsWith(".ts", true)
@@ -253,9 +254,32 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
     }
 
     private fun rokuHost(device: CastDevice): String =
-        _networkTvs.value.firstOrNull { it.id == device.id }?.host ?: throw CastException("That Roku is no longer available.")
+        device.address ?: _networkTvs.value.firstOrNull { it.id == device.id || it.name == device.name }?.host
+            ?: throw CastException("Couldn't reach ${device.name}. Make sure it's on and on the same Wi-Fi, then try again.")
 
-    private fun renderer(device: CastDevice): DlnaRenderer? = dlnaRenderers.value[device.id]
+    /** Google lists a device only while it's searching; search again briefly instead of failing. */
+    private suspend fun googleRouteFor(device: CastDevice): String {
+        fun find() = google.routes.value.firstOrNull { it.id == device.id } ?: google.routes.value.firstOrNull { it.name == device.name }
+        find()?.let { return it.id }
+        withContext(Dispatchers.Main) { google.startDiscovery() }
+        repeat(16) {
+            delay(500)
+            find()?.let { return it.id }
+        }
+        throw CastException("Couldn't reach ${device.name}. Make sure it's on and on the same Wi-Fi, then try again.")
+    }
+
+    /** Looks for the TV again before giving up, matching by name if its id changed. */
+    private suspend fun rendererFor(device: CastDevice): DlnaRenderer {
+        fun find() = dlnaRenderers.value[device.id] ?: dlnaRenderers.value.values.firstOrNull { it.friendlyName == device.name }
+        find()?.let { return it }
+        val found = runCatching { dlna.discover() }.getOrDefault(emptyList())
+        if (found.isNotEmpty()) dlnaRenderers.update { old -> old + found.associateBy { it.usn } }
+        return find() ?: throw CastException("Couldn't reach ${device.name}. Make sure it's on and on the same Wi-Fi, then try again.")
+    }
+
+    private fun renderer(device: CastDevice): DlnaRenderer? =
+        dlnaRenderers.value[device.id] ?: dlnaRenderers.value.values.firstOrNull { it.friendlyName == device.name }
 
     /** TVs can't read content:// links, so local files go through the phone's media server. */
     private fun reachableUrl(item: CastItem, mime: String): String {
