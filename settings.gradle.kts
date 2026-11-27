@@ -35,6 +35,7 @@ include(":core:network")
 include(":media:detection")
 include(":media:download")
 include(":media:playback")
+include(":media:cast")
 
 // Features
 include(":feature:browser")

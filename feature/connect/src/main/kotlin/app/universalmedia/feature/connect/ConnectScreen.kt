@@ -1,111 +1,133 @@
 package app.universalmedia.feature.connect
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.SettingsInputHdmi
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Computer
+import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.ScreenShare
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SettingsInputHdmi
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.VolumeDown
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.universalmedia.core.database.MediaItemDao
+import app.universalmedia.core.database.MediaItemEntity
+import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.FeatureCard
+import app.universalmedia.core.ui.components.MediaThumbnail
 import app.universalmedia.core.ui.components.SectionHeader
+import app.universalmedia.media.cast.ActiveCast
+import app.universalmedia.media.cast.CastDevice
+import app.universalmedia.media.cast.CastItem
+import app.universalmedia.media.cast.CastKind
+import app.universalmedia.media.cast.CastManager
 
-private data class InfoCard(
-    val key: String,
-    val icon: ImageVector,
-    val title: String,
-    val subtitle: String,
-    val details: String,
-    val badge: String?,
-)
+private data class InfoCard(val key: String, val icon: ImageVector, val title: String, val subtitle: String, val details: String)
 
-private val actions = listOf(
-    InfoCard(
-        "cast", Icons.Rounded.Cast, "Cast to a TV",
-        "Send a video to the TV. Your phone stays free.",
-        "The TV fetches the video straight from your phone over Wi-Fi, so you can lock the phone or use other apps. " +
-            "Pause, seek and volume stay on your phone.",
-        "Soon",
-    ),
+private val moreWays = listOf(
     InfoCard(
         "mirror", Icons.Rounded.ScreenShare, "Mirror your screen",
-        "Show everything on your phone on a big screen.",
-        "Android asks for permission every time; you can stop at any moment from the notification. " +
-            "Resolution and quality adjust to your Wi-Fi.",
-        "Soon",
+        "Coming soon. For now, use your phone's own Smart View / Cast screen.",
+        "Screen mirroring with a free TV receiver app is the next big feature. Until then, swipe down on your phone " +
+            "and use Smart View (Samsung) or Cast screen; most smart TVs accept it.",
     ),
     InfoCard(
         "transfer", Icons.Rounded.SwapHoriz, "Send to a device",
-        "Move files between phones and computers on your Wi-Fi.",
-        "Transfers go directly between devices on your network with a one-time pairing code. Nothing passes through the internet.",
-        "Soon",
-    ),
-)
-
-private val receivers = listOf(
-    InfoCard(
-        "gcast", Icons.Rounded.Cast, "Chromecast & Google TV",
-        "Also TVs with Chromecast built in (Sony, TCL, Hisense, Philips...)",
-        "Uses Google Cast with the free built-in receiver, so no account or setup is needed.",
-        null,
-    ),
-    InfoCard(
-        "dlna", Icons.Rounded.Tv, "Smart TVs (DLNA)",
-        "Samsung, LG, Panasonic, Roku TVs, many soundbars and consoles",
-        "Most smart TVs made in the last decade can play from a phone over DLNA/UPnP. Your TV appears automatically when it is on the same Wi-Fi.",
-        null,
-    ),
-    InfoCard(
-        "web", Icons.Rounded.Language, "Any TV with a web browser",
-        "Fire TV, older smart TVs, game consoles, computers",
-        "If nothing else works, the app shows a short local address. Open it in the TV's browser to play the video from your phone.",
-        null,
-    ),
-    InfoCard(
-        "companion", Icons.Rounded.Computer, "Android TV & Fire TV app",
-        "Free receiver app for screen mirroring and the best quality",
-        "A small companion app for Android TV, Google TV and Fire TV receives mirroring and casts with the lowest delay.",
-        null,
+        "Coming soon: move files between phones and computers on your Wi-Fi.",
+        "Transfers will go directly between devices on your network with a one-time pairing code. Nothing passes through the internet.",
     ),
     InfoCard(
         "hdmi", Icons.Rounded.SettingsInputHdmi, "Cable (HDMI)",
         "Works today with a USB-C to HDMI adapter",
-        "On phones that support video out, connect a USB-C to HDMI adapter. Any TV with an HDMI port works, no Wi-Fi needed.",
-        null,
+        "On phones that support video output, a USB-C to HDMI adapter shows your screen on any TV with an HDMI port. No Wi-Fi needed.",
     ),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConnectScreen(onOpenSettings: () -> Unit) {
-    var openKey by rememberSaveable { mutableStateOf<String?>(null) }
+fun ConnectScreen(
+    cast: CastManager,
+    mediaItemDao: MediaItemDao,
+    nowPlaying: CastItem?,
+    pendingItem: CastItem?,
+    onPendingConsumed: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val devices by cast.devices.collectAsStateWithLifecycle()
+    val active by cast.active.collectAsStateWithLifecycle()
+    val searching by cast.searching.collectAsStateWithLifecycle()
+    val tvAddress by cast.tvBrowserAddress.collectAsStateWithLifecycle()
+    var pickFor by remember { mutableStateOf<CastDevice?>(null) }
+    var openInfo by rememberSaveable { mutableStateOf<String?>(null) }
+
+    DisposableEffect(cast) {
+        cast.startDiscovery()
+        onDispose { cast.stopDiscovery() }
+    }
+
+    fun choose(device: CastDevice) {
+        val item = pendingItem
+        if (item != null) {
+            cast.cast(device, item)
+            onPendingConsumed()
+        } else {
+            pickFor = device
+        }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -126,32 +148,213 @@ fun ConnectScreen(onOpenSettings: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp),
         ) {
-            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                actions.forEach { card ->
-                    FeatureCard(card.icon, card.title, card.subtitle, badge = card.badge, onClick = { openKey = card.key })
-                }
+            active?.let { NowCasting(it, cast) }
+
+            pendingItem?.let {
+                Text(
+                    "Choose a TV to play “${it.title}”",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp),
+                )
             }
-            SectionHeader("Works with your TV")
+
+            SectionHeader("Play on a TV")
+            if (searching) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(2.dp))
+                Spacer(Modifier.height(8.dp))
+            }
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                receivers.forEach { card ->
+                if (tvAddress == null && devices.isEmpty()) {
                     FeatureCard(
-                        card.icon, card.title, card.subtitle,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        onClick = { openKey = card.key },
+                        Icons.Rounded.Wifi,
+                        "Connect to Wi-Fi",
+                        "Your phone and TV need to be on the same Wi-Fi network to find each other.",
+                        tint = MaterialTheme.colorScheme.tertiary,
                     )
                 }
+                devices.forEach { device ->
+                    FeatureCard(
+                        icon = when (device.kind) {
+                            CastKind.GOOGLE_CAST -> Icons.Rounded.Cast
+                            CastKind.DLNA -> Icons.Rounded.Tv
+                            CastKind.TV_BROWSER -> Icons.Rounded.Language
+                        },
+                        title = device.name,
+                        subtitle = device.detail ?: when (device.kind) {
+                            CastKind.GOOGLE_CAST -> "Chromecast / Google TV"
+                            CastKind.DLNA -> "Smart TV (DLNA)"
+                            CastKind.TV_BROWSER -> "Open the address in the TV's browser"
+                        },
+                        tint = if (device.kind == CastKind.TV_BROWSER) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
+                        onClick = { choose(device) },
+                    )
+                }
+                if (devices.none { it.kind != CastKind.TV_BROWSER } && !searching && tvAddress != null) {
+                    Text(
+                        "No TVs found yet. Make sure the TV is on and on the same Wi-Fi. " +
+                            "Any TV with a web browser can still use the address above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+            }
+
+            SectionHeader("More ways")
+            Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                moreWays.forEach { card ->
+                    FeatureCard(card.icon, card.title, card.subtitle, onClick = { openInfo = card.key })
+                }
+                FeatureCard(
+                    Icons.Rounded.Computer,
+                    "Android TV & Fire TV app",
+                    "Coming soon: a free receiver app for the smoothest playback and mirroring.",
+                )
             }
         }
     }
 
-    val open = (actions + receivers).firstOrNull { it.key == openKey }
-    if (open != null) {
-        AlertDialog(
-            onDismissRequest = { openKey = null },
-            icon = { Icon(open.icon, contentDescription = null) },
-            title = { Text(open.title) },
-            text = { Text(open.details) },
-            confirmButton = { TextButton(onClick = { openKey = null }) { Text("Got it") } },
+    pickFor?.let { device ->
+        PickMediaSheet(
+            device = device,
+            nowPlaying = nowPlaying,
+            mediaItemDao = mediaItemDao,
+            onPick = { item ->
+                pickFor = null
+                cast.cast(device, item)
+            },
+            onDismiss = { pickFor = null },
         )
+    }
+
+    moreWays.firstOrNull { it.key == openInfo }?.let { info ->
+        AlertDialog(
+            onDismissRequest = { openInfo = null },
+            icon = { Icon(info.icon, contentDescription = null) },
+            title = { Text(info.title) },
+            text = { Text(info.details) },
+            confirmButton = { TextButton(onClick = { openInfo = null }) { Text("Got it") } },
+        )
+    }
+}
+
+@Composable
+private fun NowCasting(active: ActiveCast, cast: CastManager) {
+    val status = active.status
+    var dragging by remember { mutableStateOf(false) }
+    var dragValue by remember { mutableFloatStateOf(0f) }
+    Column(
+        Modifier
+            .padding(16.dp)
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(16.dp),
+    ) {
+        Text("Playing on ${active.device.name}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(active.item.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val error = active.error
+        when {
+            error != null -> Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            active.connecting -> Text("Connecting…", style = MaterialTheme.typography.bodySmall)
+        }
+        if (status.durationMs > 0) {
+            Slider(
+                value = if (dragging) dragValue else status.positionMs.toFloat().coerceAtMost(status.durationMs.toFloat()),
+                onValueChange = { dragging = true; dragValue = it },
+                onValueChangeFinished = { cast.seekTo(dragValue.toLong()); dragging = false },
+                valueRange = 0f..status.durationMs.toFloat(),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                Text(formatDuration(status.positionMs), style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.weight(1f))
+                Text(formatDuration(status.durationMs), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+            IconButton(onClick = { cast.changeVolume(up = false) }) { Icon(Icons.Rounded.VolumeDown, contentDescription = "Volume down") }
+            IconButton(onClick = { cast.seekTo((status.positionMs - 10_000).coerceAtLeast(0)) }) {
+                Icon(Icons.Rounded.Replay10, contentDescription = "Back 10 seconds")
+            }
+            FilledIconButton(onClick = { if (status.playing) cast.pause() else cast.play() }, modifier = Modifier.size(56.dp)) {
+                Icon(if (status.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = if (status.playing) "Pause" else "Play")
+            }
+            IconButton(onClick = { cast.seekTo(status.positionMs + 10_000) }) {
+                Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10 seconds")
+            }
+            IconButton(onClick = { cast.changeVolume(up = true) }) { Icon(Icons.Rounded.VolumeUp, contentDescription = "Volume up") }
+        }
+        TextButton(onClick = cast::stop, modifier = Modifier.align(Alignment.End)) {
+            Icon(Icons.Rounded.Stop, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text("Stop casting")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickMediaSheet(
+    device: CastDevice,
+    nowPlaying: CastItem?,
+    mediaItemDao: MediaItemDao,
+    onPick: (CastItem) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val library by remember(mediaItemDao) { mediaItemDao.observeAll() }.collectAsStateWithLifecycle(emptyList())
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Text(
+            "Play on ${device.name}",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp),
+        )
+        LazyColumn(contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp)) {
+            if (nowPlaying != null) {
+                item {
+                    PickRow(nowPlaying.title, "Playing on this phone", null, false) { onPick(nowPlaying) }
+                }
+            }
+            if (library.isEmpty() && nowPlaying == null) {
+                item {
+                    Text(
+                        "Your library is empty. Save or add a video first.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+            items(library, key = { it.id }) { item ->
+                PickRow(
+                    item.title,
+                    item.durationMs?.let(::formatDuration) ?: "",
+                    item.thumbnailPath,
+                    item.mimeType?.startsWith("audio") == true,
+                ) { onPick(item.toCastItem()) }
+            }
+        }
+    }
+}
+
+private fun MediaItemEntity.toCastItem() = CastItem(title = title, uri = uri, mimeType = mimeType)
+
+@Composable
+private fun PickRow(title: String, subtitle: String, thumbnail: String?, isAudio: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MediaThumbnail(thumbnail, isAudio, Modifier.size(width = 80.dp, height = 45.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (subtitle.isNotBlank()) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }

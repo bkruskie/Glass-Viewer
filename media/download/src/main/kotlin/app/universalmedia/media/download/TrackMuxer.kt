@@ -18,7 +18,41 @@ internal object TrackMuxer {
 
     private val webmMimes = setOf("video/x-vnd.on2.vp8", "video/x-vnd.on2.vp9", "audio/vorbis", "audio/opus")
 
-    private class Source(val extractor: MediaExtractor, val trackMap: MutableMap<Int, Int> = mutableMapOf())
+    private class Source(
+        val extractor: MediaExtractor,
+        val trackMap: MutableMap<Int, Int> = mutableMapOf(),
+        var offsetUs: Long = 0,
+    )
+
+    /**
+     * Earliest timestamp in [file]. Stream segments keep the broadcaster's clock
+     * (often minutes or hours in), and separate audio files usually start at 0; left
+     * as is, players wait forever for one track to "catch up" and the video freezes.
+     */
+    private fun firstTimestampUs(file: File): Long {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(file.absolutePath)
+            for (t in 0 until ex.trackCount) {
+                val mime = ex.getTrackFormat(t).getString(MediaFormat.KEY_MIME).orEmpty()
+                if (mime.startsWith("video/") || mime.startsWith("audio/")) ex.selectTrack(t)
+            }
+            var min = Long.MAX_VALUE
+            var scanned = 0
+            while (scanned < 2_000) { // the first few seconds are enough; B-frames sit near the start
+                val time = ex.sampleTime
+                if (time < 0) break
+                if (time < min) min = time
+                ex.advance()
+                scanned++
+            }
+            if (min == Long.MAX_VALUE) 0 else min
+        } catch (e: Exception) {
+            0
+        } finally {
+            runCatching { ex.release() }
+        }
+    }
 
     /** True when [file] has a video track but no audio track. */
     fun hasNoAudio(file: File): Boolean {
@@ -35,7 +69,9 @@ internal object TrackMuxer {
     }
 
     fun mux(inputs: List<File>, outDir: File, baseName: String): Output {
-        val sources = inputs.map { file -> Source(MediaExtractor().apply { setDataSource(file.absolutePath) }) }
+        val sources = inputs.map { file ->
+            Source(MediaExtractor().apply { setDataSource(file.absolutePath) }, offsetUs = firstTimestampUs(file))
+        }
         var muxer: MediaMuxer? = null
         try {
             val selected = mutableListOf<Triple<Source, Int, MediaFormat>>()
@@ -90,11 +126,12 @@ internal object TrackMuxer {
                 var nextTime = Long.MAX_VALUE
                 for (i in sources.indices) {
                     if (finished[i]) continue
-                    val time = sources[i].extractor.sampleTime
-                    if (time < 0) {
+                    val raw = sources[i].extractor.sampleTime
+                    if (raw < 0) {
                         finished[i] = true
                         continue
                     }
+                    val time = raw - sources[i].offsetUs
                     if (time < nextTime) {
                         nextTime = time
                         next = i
@@ -116,7 +153,9 @@ internal object TrackMuxer {
                 val target = source.trackMap[ex.sampleTrackIndex]
                 if (target != null) {
                     val keyFrame = (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
-                    info.set(0, size, ex.sampleTime, if (keyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+                    // Each source starts at 0; tracks inside one source keep their relative timing.
+                    val time = (ex.sampleTime - source.offsetUs).coerceAtLeast(0)
+                    info.set(0, size, time, if (keyFrame) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     m.writeSampleData(target, buffer, info)
                 }
                 ex.advance()

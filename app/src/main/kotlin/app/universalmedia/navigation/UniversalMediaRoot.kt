@@ -54,6 +54,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.universalmedia.media.playback.PlayRequest
+import app.universalmedia.media.cast.CastItem
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.media.download.MediaDownloadManager
@@ -172,6 +173,10 @@ fun UniversalMediaRoot(
         }
     }
 
+    // ---- Casting to a TV -----------------------------------------------------------
+    var pendingCast by remember { mutableStateOf<CastItem?>(null) }
+    val playingNow by playback.current.collectAsStateWithLifecycle()
+
     // When a download finishes while the app is open, ask how to watch it.
     val allDownloads by remember(container) { container.downloads.observe() }.collectAsStateWithLifecycle(emptyList())
     var seenCompleted by remember { mutableStateOf<Set<String>?>(null) }
@@ -268,6 +273,10 @@ fun UniversalMediaRoot(
                         inPictureInPicture = inPictureInPicture,
                         onFullscreenChange = { playerFullscreen = it },
                         onOpenLibrary = { navController.navigateTopLevel(TopDestination.LIBRARY.route) },
+                        onCast = { request ->
+                            pendingCast = CastItem(request.title, request.uri, request.mimeType)
+                            navController.navigateTopLevel(TopDestination.CONNECT.route)
+                        },
                     )
                 }
                 composable(TopDestination.LIBRARY.route) {
@@ -288,7 +297,17 @@ fun UniversalMediaRoot(
                     )
                 }
                 composable(TopDestination.CONNECT.route) {
-                    ConnectScreen(onOpenSettings = openSettings)
+                    ConnectScreen(
+                        cast = container.cast,
+                        mediaItemDao = container.database.mediaItemDao(),
+                        nowPlaying = playingNow?.let { CastItem(it.title, it.uri, it.mimeType) },
+                        pendingItem = pendingCast,
+                        onPendingConsumed = {
+                            pendingCast = null
+                            playback.player.pause()
+                        },
+                        onOpenSettings = openSettings,
+                    )
                 }
                 composable(SETTINGS_ROUTE) {
                     SettingsScreen(

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.VideoLibrary
@@ -78,6 +79,7 @@ fun PlayerScreen(
     inPictureInPicture: Boolean,
     onFullscreenChange: (Boolean) -> Unit,
     onOpenLibrary: () -> Unit,
+    onCast: (PlayRequest) -> Unit = {},
 ) {
     val current by playback.current.collectAsStateWithLifecycle()
     val problem by playback.problem.collectAsStateWithLifecycle()
@@ -161,6 +163,7 @@ fun PlayerScreen(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
+                    IconButton(onClick = { onCast(playing) }) { Icon(Icons.Rounded.Cast, contentDescription = "Play on a TV") }
                     IconButton(onClick = playback::stop) { Icon(Icons.Rounded.Close, contentDescription = "Close player") }
                 }
                 problem?.let { message ->
