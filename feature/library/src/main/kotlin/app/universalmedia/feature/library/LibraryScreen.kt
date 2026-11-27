@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.Movie
@@ -83,6 +84,17 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.import(uris)
     }
+    val deleteRequest by viewModel.deleteRequest.collectAsStateWithLifecycle()
+    val systemDelete = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        viewModel.onDeleteConfirmed(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+    LaunchedEffect(deleteRequest) {
+        deleteRequest?.let { (_, sender) ->
+            systemDelete.launch(androidx.activity.result.IntentSenderRequest.Builder(sender).build())
+        }
+    }
+    var renaming by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var deleting by remember { mutableStateOf<MediaItemEntity?>(null) }
 
     LaunchedEffect(message) {
         message?.let {
@@ -152,6 +164,7 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
                 Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                SortChip(state.sort, viewModel::setSort)
                 LibraryFilter.entries.forEach { f ->
                     FilterChip(selected = state.filter == f, onClick = { viewModel.setFilter(f) }, label = { Text(f.label) })
                 }
@@ -175,11 +188,78 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPla
                             onOpen = { openExternally(context, item) },
                             onFavorite = { viewModel.toggleFavorite(item) },
                             onRemove = { viewModel.remove(item) },
+                            onRename = { renaming = item },
+                            onShare = { shareFile(context, item) },
+                            onDelete = { deleting = item },
                         )
                     }
                 }
             }
         }
+    }
+
+    renaming?.let { item -> RenameDialog(item, onRename = { viewModel.rename(item, it) }, onDismiss = { renaming = null }) }
+    deleting?.let { item -> DeleteDialog(item, onDelete = { viewModel.deleteFile(item) }, onDismiss = { deleting = null }) }
+}
+
+@Composable
+private fun SortChip(current: LibrarySort, onSort: (LibrarySort) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FilterChip(
+            selected = current != LibrarySort.NEWEST,
+            onClick = { open = true },
+            label = { Text("Sort: ${current.label}") },
+            leadingIcon = { Icon(Icons.Rounded.SwapVert, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            LibrarySort.entries.forEach { s ->
+                DropdownMenuItem(text = { Text(s.label) }, onClick = { open = false; onSort(s) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RenameDialog(item: MediaItemEntity, onRename: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember(item.id) { mutableStateOf(item.title) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onRename(text); onDismiss() }, enabled = text.isNotBlank()) { Text("Rename") }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DeleteDialog(item: MediaItemEntity, onDelete: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete from phone?") },
+        text = { Text("“${item.title}” will be deleted from this phone. This can't be undone.") },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onDelete(); onDismiss() }) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun shareFile(context: Context, item: MediaItemEntity) {
+    val intent = Intent(Intent.ACTION_SEND)
+        .setType(item.mimeType ?: "video/*")
+        .putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(intent, "Share “${item.title}”"))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No app can share this file", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -190,6 +270,9 @@ private fun MediaRow(
     onOpen: () -> Unit,
     onFavorite: () -> Unit,
     onRemove: () -> Unit,
+    onRename: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val isAudio = item.mimeType?.startsWith("audio") == true
     var menu by remember { mutableStateOf(false) }
@@ -225,8 +308,14 @@ private fun MediaRow(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; onShare() })
                 DropdownMenuItem(text = { Text("Open with…") }, onClick = { menu = false; onOpen() })
                 DropdownMenuItem(text = { Text("Remove from library") }, onClick = { menu = false; onRemove() })
+                DropdownMenuItem(
+                    text = { Text("Delete from phone", color = MaterialTheme.colorScheme.error) },
+                    onClick = { menu = false; onDelete() },
+                )
             }
         }
     }

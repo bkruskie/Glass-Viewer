@@ -25,12 +25,17 @@ import kotlinx.coroutines.withContext
 
 enum class LibraryFilter(val label: String) { ALL("All"), VIDEO("Video"), AUDIO("Audio"), FAVORITES("Favorites") }
 
+enum class LibrarySort(val label: String) {
+    NEWEST("Newest"), OLDEST("Oldest"), NAME("Name"), LARGEST("Largest"), LONGEST("Longest"), RECENTLY_PLAYED("Recently played")
+}
+
 data class LibraryUiState(
     val items: List<MediaItemEntity> = emptyList(),
     val totalCount: Int = 0,
     val totalBytes: Long = 0,
     val query: String = "",
     val filter: LibraryFilter = LibraryFilter.ALL,
+    val sort: LibrarySort = LibrarySort.NEWEST,
 )
 
 class LibraryViewModel(
@@ -40,6 +45,11 @@ class LibraryViewModel(
 
     private val query = MutableStateFlow("")
     private val filter = MutableStateFlow(LibraryFilter.ALL)
+    private val sort = MutableStateFlow(LibrarySort.NEWEST)
+
+    /** Set when Android must confirm deleting a file the app didn't create. */
+    private val _deleteRequest = MutableStateFlow<Pair<MediaItemEntity, android.content.IntentSender>?>(null)
+    val deleteRequest: StateFlow<Pair<MediaItemEntity, android.content.IntentSender>?> = _deleteRequest.asStateFlow()
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -48,7 +58,8 @@ class LibraryViewModel(
         dao.observeTotalBytes(),
         query,
         filter,
-    ) { all, bytes, q, f ->
+        sort,
+    ) { all, bytes, q, f, order ->
         val filtered = all.filter { item ->
             val mime = item.mimeType.orEmpty()
             val matchesFilter = when (f) {
@@ -59,7 +70,15 @@ class LibraryViewModel(
             }
             matchesFilter && (q.isBlank() || item.title.contains(q.trim(), ignoreCase = true))
         }
-        LibraryUiState(filtered, all.size, bytes, q, f)
+        val sorted = when (order) {
+            LibrarySort.NEWEST -> filtered
+            LibrarySort.OLDEST -> filtered.sortedBy { it.addedAt }
+            LibrarySort.NAME -> filtered.sortedBy { it.title.lowercase() }
+            LibrarySort.LARGEST -> filtered.sortedByDescending { it.sizeBytes ?: 0 }
+            LibrarySort.LONGEST -> filtered.sortedByDescending { it.durationMs ?: 0 }
+            LibrarySort.RECENTLY_PLAYED -> filtered.sortedByDescending { it.lastPlayedAt ?: 0 }
+        }
+        LibraryUiState(sorted, all.size, bytes, q, f, order)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     init {
@@ -87,7 +106,66 @@ class LibraryViewModel(
 
     fun setFilter(value: LibraryFilter) { filter.value = value }
 
+    fun setSort(value: LibrarySort) { sort.value = value }
+
     fun consumeMessage() { _message.value = null }
+
+    fun rename(item: MediaItemEntity, title: String) {
+        val clean = title.trim()
+        if (clean.isEmpty() || clean == item.title) return
+        viewModelScope.launch { dao.rename(item.id, clean) }
+    }
+
+    /**
+     * Deletes the file from the phone and the library. Files the app saved are deleted
+     * straight away; for others Android shows its own confirmation ([deleteRequest]).
+     */
+    fun deleteFile(item: MediaItemEntity) {
+        viewModelScope.launch {
+            val uri = Uri.parse(item.uri)
+            val result = withContext(Dispatchers.IO) {
+                runCatching<android.content.IntentSender?> {
+                    val deleted = if (android.provider.DocumentsContract.isDocumentUri(app, uri)) {
+                        android.provider.DocumentsContract.deleteDocument(app.contentResolver, uri)
+                    } else {
+                        app.contentResolver.delete(uri, null, null) > 0
+                    }
+                    if (deleted) null else error("not deleted")
+                }.recoverCatching { e ->
+                    if (e is SecurityException && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R &&
+                        uri.authority == android.provider.MediaStore.AUTHORITY
+                    ) {
+                        android.provider.MediaStore.createDeleteRequest(app.contentResolver, listOf(uri)).intentSender
+                    } else if (e is SecurityException && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+                        e is android.app.RecoverableSecurityException
+                    ) {
+                        e.userAction.actionIntent.intentSender
+                    } else {
+                        throw e
+                    }
+                }
+            }
+            result.fold(
+                onSuccess = { sender ->
+                    if (sender == null) forget(item, "Deleted “${item.title}”") else _deleteRequest.value = item to sender
+                },
+                onFailure = { _message.value = "Couldn't delete this file. You can remove it from the library instead." },
+            )
+        }
+    }
+
+    /** Called with Android's answer to [deleteRequest]. */
+    fun onDeleteConfirmed(confirmed: Boolean) {
+        val item = _deleteRequest.value?.first ?: return
+        _deleteRequest.value = null
+        if (confirmed) viewModelScope.launch { forget(item, "Deleted “${item.title}”") }
+    }
+
+    private suspend fun forget(item: MediaItemEntity, note: String) {
+        item.thumbnailPath?.takeIf { it.isNotEmpty() }?.let { path -> withContext(Dispatchers.IO) { runCatching { java.io.File(path).delete() } } }
+        dao.delete(item.id)
+        _message.value = note
+    }
 
     fun toggleFavorite(item: MediaItemEntity) {
         viewModelScope.launch { dao.setFavorite(item.id, !item.isFavorite) }

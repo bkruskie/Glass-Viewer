@@ -131,6 +131,16 @@ class LocalMediaServer(private val context: Context) {
                 val path = parts[1].substringBefore('?')
                 val out = s.getOutputStream()
                 when {
+                    method == "OPTIONS" -> writeHead(
+                        out, 204, "No Content",
+                        mapOf(
+                            "Access-Control-Allow-Origin" to "*",
+                            "Access-Control-Allow-Methods" to "GET, HEAD, OPTIONS",
+                            "Access-Control-Allow-Headers" to "Range, Content-Type",
+                            "Access-Control-Expose-Headers" to "Content-Length, Content-Range",
+                            "Content-Length" to "0",
+                        ),
+                    )
                     path.startsWith("/m/") -> serveMedia(path, method, headers, out)
                     path.startsWith("/h/") -> playlists[path.removePrefix("/h/").substringBefore('/')]
                         ?.let { respond(out, 200, "application/vnd.apple.mpegurl", it.toByteArray()) }
@@ -184,6 +194,7 @@ class LocalMediaServer(private val context: Context) {
                 "transferMode.dlna.org" to "Streaming",
                 "contentFeatures.dlna.org" to DlnaProtocol.DLNA_FEATURES,
                 "Access-Control-Allow-Origin" to "*",
+                "Access-Control-Expose-Headers" to "Content-Length, Content-Range",
             )
             if (partial) head["Content-Range"] = "bytes $start-$end/$length"
             writeHead(out, if (partial) 206 else 200, if (partial) "Partial Content" else "OK", head)

@@ -139,16 +139,14 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                 when (device.kind) {
                     CastKind.GOOGLE_CAST -> {
                         val routeId = googleRouteFor(device)
-                        withContext(Dispatchers.Main) { google.load(routeId, url, item.title, mime) }
+                        // Chromecast plays MPEG-TS only inside HLS, like Roku.
+                        val (playUrl, playMime) = tsAsHls(item, url, mime)
+                        withContext(Dispatchers.Main) { google.load(routeId, playUrl, item.title, playMime) }
                     }
                     CastKind.DLNA -> dlna.load(rendererFor(device), url, item.title, mime)
                     CastKind.ROKU -> {
                         // Roku plays MPEG-TS only inside HLS, so wrap saved .ts files in a playlist.
-                        val isTs = mime.contains("mp2t", true) || url.substringBefore('?').endsWith(".ts", true)
-                        val local = Uri.parse(item.uri).takeIf { it.scheme == "content" || it.scheme == "file" }
-                        val (playUrl, playMime) = if (isTs) {
-                            (server.publishTsAsHls(url, local) ?: throw CastException("Connect to Wi-Fi to play on a TV.")) to "application/x-mpegURL"
-                        } else url to mime
+                        val (playUrl, playMime) = tsAsHls(item, url, mime)
                         dlna.rokuPlay(rokuHost(device), playUrl, playMime, item.title)
                     }
                     CastKind.TV_BROWSER -> server.webReceiver.load(url, item.title)
@@ -280,6 +278,15 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
 
     private fun renderer(device: CastDevice): DlnaRenderer? =
         dlnaRenderers.value[device.id] ?: dlnaRenderers.value.values.firstOrNull { it.friendlyName == device.name }
+
+    /** Wraps a single .ts file in an HLS playlist for players that only take TS inside HLS. */
+    private fun tsAsHls(item: CastItem, url: String, mime: String): Pair<String, String> {
+        val isTs = mime.contains("mp2t", true) || url.substringBefore('?').endsWith(".ts", true)
+        if (!isTs) return url to mime
+        val local = Uri.parse(item.uri).takeIf { it.scheme == "content" || it.scheme == "file" }
+        val playlist = server.publishTsAsHls(url, local) ?: throw CastException("Connect to Wi-Fi to play on a TV.")
+        return playlist to "application/x-mpegURL"
+    }
 
     /** TVs can't read content:// links, so local files go through the phone's media server. */
     private fun reachableUrl(item: CastItem, mime: String): String {
