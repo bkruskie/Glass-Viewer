@@ -49,7 +49,7 @@ class LocalMediaServer(private val context: Context) {
         if (running != null && !running.isClosed) {
             return "http://${ip.hostAddress}:${running.localPort}".also { _baseUrl.value = it }
         }
-        val socket = ServerSocket(0, 50)
+        val socket = runCatching { ServerSocket(0, 50) }.getOrNull() ?: return null.also { _baseUrl.value = null }
         server = socket
         pool.execute { acceptLoop(socket) }
         return "http://${ip.hostAddress}:${socket.localPort}".also { _baseUrl.value = it }

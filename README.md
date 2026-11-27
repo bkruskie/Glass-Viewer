@@ -4,6 +4,8 @@ A free, private, all-in-one media app for Android: browse, detect, download, pla
 
 **Current version:** `0.4.0`: downloads and the built-in player. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and roadmap.
 
+**New here? Read the [user guide](docs/USER_GUIDE.md).**
+
 ## What works in this build
 
 - **Browser** with tabs, address bar (search or URL), history, bookmarks, fullscreen video, Safe Browsing and third-party cookie blocking.

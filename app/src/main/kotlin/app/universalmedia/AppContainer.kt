@@ -38,7 +38,13 @@ class AppContainer(private val application: Application) {
     val httpClient: OkHttpClient by lazy { OkHttpManifestFetcher.defaultClient() }
 
     /** Process-wide scope for work that outlives screens. */
-    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val appScope: CoroutineScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                // A failed background task (a TV that vanished, a dropped transfer) must not close the app.
+                android.util.Log.w("UniversalMedia", "Background task failed", e)
+            },
+    )
 
     private val browserUserAgent: String? by lazy {
         runCatching { WebSettings.getDefaultUserAgent(application) }.getOrNull()

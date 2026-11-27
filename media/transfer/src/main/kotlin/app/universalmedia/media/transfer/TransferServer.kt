@@ -74,7 +74,7 @@ class TransferServer(
         _session.value?.let { return it.address }
         val ip = LocalMediaServer.localIpv4(context)?.hostAddress ?: return null
         token = ByteArray(9).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-        val socket = ServerSocket(0, 50)
+        val socket = runCatching { ServerSocket(0, 50) }.getOrNull() ?: return null
         server = socket
         pool.execute { acceptLoop(socket) }
         val address = "http://$ip:${socket.localPort}/$token/"

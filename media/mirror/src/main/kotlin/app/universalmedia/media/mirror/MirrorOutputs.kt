@@ -175,7 +175,7 @@ internal class H264Output(
 internal class MjpegOutput(
     width: Int,
     height: Int,
-    private val onReady: (port: Int) -> Unit,
+    private val onReady: (port: Int, key: String) -> Unit,
     private val onFailure: (String) -> Unit,
 ) : MirrorOutput {
 
@@ -184,6 +184,9 @@ internal class MjpegOutput(
     private val handler = Handler(handlerThread.looper)
     private val pool = Executors.newCachedThreadPool()
     private val server = ServerSocket(0)
+
+    /** Short secret in the address so others on the Wi-Fi can't watch the screen. Easy to type on a TV remote. */
+    val key: String = java.security.SecureRandom().let { r -> (1..5).map { "abcdefghjkmnpqrstuvwxyz23456789"[r.nextInt(31)] }.joinToString("") }
     private val frameLock = Object()
     @Volatile private var frame: ByteArray? = null
     @Volatile private var frameSeq = 0L
@@ -194,7 +197,7 @@ internal class MjpegOutput(
 
     init {
         pool.execute { acceptLoop() }
-        onReady(server.localPort)
+        onReady(server.localPort, key)
     }
 
     private fun newReader(width: Int, height: Int): ImageReader {
@@ -251,17 +254,27 @@ internal class MjpegOutput(
                 val path = requestLine.split(' ').getOrNull(1)?.substringBefore('?') ?: "/"
                 val out = BufferedOutputStream(s.getOutputStream())
                 when (path) {
-                    "/stream.mjpg" -> stream(out)
-                    "/frame.jpg" -> {
+                    "/$key" -> {
+                        out.write("HTTP/1.1 302 Found\r\nLocation: /$key/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                        out.flush()
+                    }
+                    "/$key/stream.mjpg" -> stream(out)
+                    "/$key/frame.jpg" -> {
                         val jpeg = frame ?: ByteArray(0)
                         out.write("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
                         out.write(jpeg)
                         out.flush()
                     }
-                    else -> {
+                    "/$key/" -> {
                         val page = PAGE.toByteArray()
                         out.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${page.size}\r\nConnection: close\r\n\r\n".toByteArray())
                         out.write(page)
+                        out.flush()
+                    }
+                    else -> {
+                        val body = "Open the full address shown on the phone, including the code at the end.".toByteArray()
+                        out.write("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        out.write(body)
                         out.flush()
                     }
                 }
@@ -307,11 +320,11 @@ internal class MjpegOutput(
 <title>Universal Media · Screen</title>
 <style>html,body{margin:0;height:100%;background:#000;overflow:hidden}
 img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain}</style></head>
-<body><img id="s" src="/stream.mjpg" alt="">
+<body><img id="s" src="stream.mjpg" alt="">
 <script>
 // Some TV browsers don't play MJPEG streams: fall back to refreshing single frames.
 var s=document.getElementById('s'),fallback=false;
-s.onerror=function(){if(fallback)return;fallback=true;(function f(){s.src='/frame.jpg?t='+Date.now();setTimeout(f,120);})();};
+s.onerror=function(){if(fallback)return;fallback=true;(function f(){s.src='frame.jpg?t='+Date.now();setTimeout(f,120);})();};
 </script></body></html>
         """.trimIndent()
     }

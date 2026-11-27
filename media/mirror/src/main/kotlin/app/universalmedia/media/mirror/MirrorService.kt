@@ -130,9 +130,9 @@ class MirrorService : Service() {
             }
             MirrorTarget.Kind.WEB_BROWSER -> MjpegOutput(
                 w, h,
-                onReady = { port ->
+                onReady = { port, key ->
                     val ip = localIpv4(this)
-                    MirrorState.mutable.value = MirrorStatus.Active(chosen, ip?.let { "http://$it:$port/" })
+                    MirrorState.mutable.value = MirrorStatus.Active(chosen, ip?.let { "http://$it:$port/$key/" })
                     if (ip == null) failure("Connect to Wi-Fi to mirror to a TV.")
                 },
                 onFailure = failure,
