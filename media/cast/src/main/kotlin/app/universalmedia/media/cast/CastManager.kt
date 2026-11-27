@@ -166,7 +166,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.play() }
             CastKind.DLNA -> renderer(device)?.let { dlna.play(it) }
-            CastKind.ROKU -> dlna.rokuKey(rokuHost(device), "Play")
+            CastKind.ROKU -> if (_active.value?.status?.let { it.durationMs > 0 && !it.playing } == true) dlna.rokuKey(rokuHost(device), "Play")
             CastKind.TV_BROWSER -> server.webReceiver.send("play")
         }
     }
@@ -175,7 +175,7 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
         when (device.kind) {
             CastKind.GOOGLE_CAST -> withContext(Dispatchers.Main) { google.pause() }
             CastKind.DLNA -> renderer(device)?.let { dlna.pause(it) }
-            CastKind.ROKU -> dlna.rokuKey(rokuHost(device), "Play") // Roku's Play key toggles
+            CastKind.ROKU -> if (_active.value?.status?.playing == true) dlna.rokuKey(rokuHost(device), "Play") // Play toggles
             CastKind.TV_BROWSER -> server.webReceiver.send("pause")
         }
     }

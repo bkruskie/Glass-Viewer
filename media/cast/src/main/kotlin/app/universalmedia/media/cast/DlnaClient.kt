@@ -116,22 +116,41 @@ internal class DlnaClient(private val context: Context, private val http: OkHttp
             else -> "mp4"
         }
         val query = "t=v&u=" + enc(url) + "&k=(null)&videoName=" + enc(title.take(60)) + "&videoFormat=$format"
-        val attempts = listOf("input/15985", "launch/15985", "input/15985-noformat")
+        // "launch" starts Roku's built-in player; "input" only reaches it if it's already open,
+        // and the Roku answers OK either way, so check that something is actually playing.
+        val attempts = listOf(
+            "http://$host:8060/launch/15985?$query",
+            "http://$host:8060/input/15985?$query",
+            "http://$host:8060/launch/15985?t=v&u=${enc(url)}&k=(null)",
+        )
         val codes = mutableListOf<Int>()
-        for (a in attempts) {
-            val target = if (a.endsWith("-noformat")) "http://$host:8060/input/15985?t=v&u=${enc(url)}&k=(null)"
-            else "http://$host:8060/$a?$query"
+        for (target in attempts) {
             val code = runCatching { rokuPostCode(target) }.getOrDefault(-1)
-            if (code in 200..299) return@withContext
             if (code == 403) throw CastException(
                 "The Roku refused. On the Roku, open Settings › System › Advanced system settings › Control by mobile apps › Network access and set it to Default or Permissive.",
             )
             codes += code
+            if (code !in 200..299) continue
+            if (rokuStartedPlaying(host)) return@withContext
         }
         throw CastException(
-            "This Roku didn't accept the video (answers: ${codes.joinToString()}). " +
-                "Some Roku models don't allow apps to send video. Use Screen mirroring (Smart View) to this Roku instead.",
+            "This Roku didn't start the video (answers: ${codes.joinToString()}). " +
+                "Some Roku models don't let apps send video. Use Screen mirroring (Smart View) to this Roku instead.",
         )
+    }
+
+    /** Waits up to ~8 s for the Roku's player to open with our video. */
+    private suspend fun rokuStartedPlaying(host: String): Boolean {
+        repeat(8) {
+            kotlinx.coroutines.delay(1_000)
+            val state = runCatching {
+                http.newCall(Request.Builder().url("http://$host:8060/query/media-player").build()).execute().use { it.body?.string() }
+            }.getOrNull().orEmpty()
+            val s = Regex("state=\"([a-z]+)\"").find(state)?.groupValues?.get(1)
+            if (s == "play" || s == "buffer" || s == "startup" || s == "pause") return true
+            if (s == "error") return false
+        }
+        return false
     }
 
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
