@@ -10,6 +10,7 @@ data class HlsRendition(
     val name: String?,
     val language: String?,
     val uri: String?,
+    val isDefault: Boolean = false,
 )
 
 sealed interface HlsPlaylist {
@@ -20,7 +21,16 @@ sealed interface HlsPlaylist {
         val variants: List<MediaVariant>,
         val renditions: List<HlsRendition>,
         override val protection: Protection,
-    ) : HlsPlaylist
+        /** Variant URL → AUDIO group id, for streams that carry audio separately. */
+        val audioGroups: Map<String, String> = emptyMap(),
+    ) : HlsPlaylist {
+        /** The separate audio playlist that goes with [variantUrl], if the stream has one. */
+        fun audioFor(variantUrl: String): String? {
+            val group = audioGroups[variantUrl] ?: return null
+            val candidates = renditions.filter { it.type == "AUDIO" && it.groupId == group && it.uri != null }
+            return (candidates.firstOrNull { it.isDefault } ?: candidates.firstOrNull())?.uri
+        }
+    }
 
     /** Media playlist listing segments of one rendition. */
     data class Media(
@@ -43,6 +53,7 @@ object HlsPlaylistParser {
 
     private fun parseMaster(lines: List<String>, playlistUrl: String): HlsPlaylist.Master {
         val variants = mutableListOf<MediaVariant>()
+        val audioGroups = mutableMapOf<String, String>()
         val renditions = mutableListOf<HlsRendition>()
         val protections = mutableListOf<Protection>()
         var pending: Map<String, String>? = null
@@ -60,6 +71,7 @@ object HlsPlaylistParser {
                         name = a["NAME"],
                         language = a["LANGUAGE"],
                         uri = a["URI"]?.let { UrlUtils.resolve(playlistUrl, it) },
+                        isDefault = a["DEFAULT"].equals("YES", ignoreCase = true),
                     )
                 }
 
@@ -70,8 +82,10 @@ object HlsPlaylistParser {
                     val a = pending
                     val (w, h) = parseResolution(a["RESOLUTION"])
                     val codecs = a["CODECS"]
+                    val variantUrl = UrlUtils.resolve(playlistUrl, line)
+                    a["AUDIO"]?.let { audioGroups[variantUrl] = it }
                     variants += MediaVariant(
-                        url = UrlUtils.resolve(playlistUrl, line),
+                        url = variantUrl,
                         format = MediaFormat.HLS,
                         width = w,
                         height = h,
@@ -87,7 +101,7 @@ object HlsPlaylistParser {
         val sorted = variants.sortedWith(
             compareByDescending<MediaVariant> { it.height ?: 0 }.thenByDescending { it.bitrate ?: 0 },
         )
-        return HlsPlaylist.Master(sorted, renditions, DrmSystems.merge(protections))
+        return HlsPlaylist.Master(sorted, renditions, DrmSystems.merge(protections), audioGroups)
     }
 
     private fun parseMedia(lines: List<String>): HlsPlaylist.Media {

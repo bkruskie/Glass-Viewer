@@ -17,6 +17,7 @@ import app.universalmedia.core.database.MediaItemEntity
 import app.universalmedia.core.model.DownloadStatus
 import app.universalmedia.core.model.MediaFormat
 import app.universalmedia.core.model.formatBytes
+import app.universalmedia.media.detection.DashSegmentPlan
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -70,49 +71,113 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val url = job.variantUrl ?: job.mediaUrl
         val dir = MediaDownloadManager.partDir(ctx)
 
+        // Resume state is "phase|inner": phase = which track of a multi-track download.
+        val resumePhase = job.resumeState?.substringBefore('|', "")?.toIntOrNull() ?: 0
+        val resumeInner = job.resumeState?.let { if ('|' in it) it.substringAfter('|') else it }
         var lastSave = 0L
-        val onProgress: suspend (Long, Long?, String?) -> Unit = { done, total, state ->
+        var bytesBeforePhase = 0L
+        fun progressFor(phase: Int): suspend (Long, Long?, String?) -> Unit = { done, total, state ->
             val t = now()
             if (state != null || t - lastSave > 1_000) {
                 lastSave = t
-                env.dao.saveResume(job.id, state, done, total, t)
-                showProgress(job.title, done, total, null)
+                val all = bytesBeforePhase + done
+                val estimate = total?.let { bytesBeforePhase + it }
+                env.dao.saveResume(job.id, state?.let { "$phase|$it" }, all, estimate, t)
+                showProgress(job.title, all, estimate, null)
+            }
+        }
+        /** Runs each track download in order, skipping tracks finished before a resume. */
+        suspend fun phases(files: List<File>, block: suspend (index: Int, file: File, state: String?) -> Unit) {
+            for ((i, file) in files.withIndex()) {
+                if (i < resumePhase) {
+                    bytesBeforePhase += file.length()
+                    continue
+                }
+                block(i, file, if (i == resumePhase) resumeInner else null)
+                bytesBeforePhase += file.length()
             }
         }
 
         val finished: File
         val mime: String
         val extension: String
-        if (format == MediaFormat.HLS) {
-            val part = File(dir, "${job.id}.hls")
-            val out = HlsDownloader(http).download(url, part, job.resumeState) { d, t, s -> onProgress(d, t, s) }
-            if (out.fragmentedMp4) {
-                finished = out.file
-                mime = if (job.audioOnly) "audio/mp4" else "video/mp4"
-                extension = if (job.audioOnly) "m4a" else "mp4"
-            } else {
-                showProgress(job.title, part.length(), part.length(), "Finishing…")
-                val mp4 = File(dir, "${job.id}.mp4")
-                if (remuxToMp4(ctx, part, mp4) && mp4.length() > 0) {
-                    part.delete()
-                    finished = mp4
-                    mime = "video/mp4"
-                    extension = "mp4"
+        when (format) {
+            MediaFormat.HLS -> {
+                val (videoUrl, audioUrl) = if (job.audioOnly) url to null else resolveHlsTracks(http, url, job.mediaUrl)
+                if (audioUrl == null) {
+                    val part = File(dir, "${job.id}.hls")
+                    val out = HlsDownloader(http).download(videoUrl, part, resumeInner, progressFor(0))
+                    if (out.fragmentedMp4) {
+                        finished = out.file
+                        mime = if (job.audioOnly) "audio/mp4" else "video/mp4"
+                        extension = if (job.audioOnly) "m4a" else "mp4"
+                    } else {
+                        showProgress(job.title, part.length(), part.length(), "Finishing…")
+                        val mp4 = File(dir, "${job.id}.mp4")
+                        if (remuxToMp4(ctx, part, mp4) && mp4.length() > 0) {
+                            part.delete()
+                            finished = mp4
+                            mime = "video/mp4"
+                            extension = "mp4"
+                        } else {
+                            mp4.delete()
+                            finished = part
+                            mime = "video/mp2t"
+                            extension = "ts"
+                        }
+                    }
                 } else {
-                    mp4.delete()
-                    finished = part
-                    mime = "video/mp2t"
-                    extension = "ts"
+                    // Video and audio come as separate playlists: fetch both, then combine.
+                    val files = listOf(File(dir, "${job.id}.v.hls"), File(dir, "${job.id}.a.hls"))
+                    val urls = listOf(videoUrl, audioUrl)
+                    phases(files) { i, file, state -> HlsDownloader(http).download(urls[i], file, state, progressFor(i)) }
+                    showProgress(job.title, bytesBeforePhase, bytesBeforePhase, "Finishing…")
+                    val out = TrackMuxer.mux(files, dir, "${job.id}.out")
+                    files.forEach { it.delete() }
+                    finished = out.file
+                    mime = out.mimeType
+                    extension = out.extension
                 }
             }
-        } else {
-            val part = File(dir, "${job.id}.part")
-            val contentType = ProgressiveDownloader(http).download(url, part) { d, t -> onProgress(d, t, null) }
-            finished = part
-            mime = contentType?.substringBefore(';')?.trim()?.lowercase()
-                ?.takeIf { it.startsWith("video/") || it.startsWith("audio/") }
-                ?: format.mimeTypes.firstOrNull() ?: "application/octet-stream"
-            extension = format.extensions.firstOrNull() ?: "bin"
+            MediaFormat.DASH -> {
+                val (text, finalUrl) = retrying { http.text(url) }
+                val plan = DashSegmentPlan.parse(text, finalUrl) ?: throw DownloadException("Unreadable DASH manifest.")
+                if (plan.isProtected) throw DownloadException("This stream is protected by DRM and can't be saved.")
+                if (plan.isLive) throw DownloadException("Live streams can't be saved yet.")
+                val tracks = plan.select(job.targetHeight, job.targetBitrate, job.audioOnly)
+                if (tracks.isEmpty()) throw DownloadException("The stream lists no downloadable tracks.")
+                val files = tracks.indices.map { File(dir, "${job.id}.d$it") }
+                phases(files) { i, file, state ->
+                    val track = tracks[i]
+                    val single = track.segments.singleOrNull()
+                    if (track.initSegment == null && single != null && single.byteRange == null) {
+                        ProgressiveDownloader(http).download(single.url, file) { d, t -> progressFor(i)(d, t, null) }
+                    } else {
+                        SegmentDownloader(http).download(
+                            init = track.initSegment?.let { Piece(it.url, it.byteRange?.rangeHeader) },
+                            pieces = track.segments.map { Piece(it.url, it.byteRange?.rangeHeader) },
+                            part = file,
+                            resumeState = state,
+                            onProgress = progressFor(i),
+                        )
+                    }
+                }
+                showProgress(job.title, bytesBeforePhase, bytesBeforePhase, "Finishing…")
+                val out = TrackMuxer.mux(files, dir, "${job.id}.out")
+                files.forEach { it.delete() }
+                finished = out.file
+                mime = out.mimeType
+                extension = out.extension
+            }
+            else -> {
+                val part = File(dir, "${job.id}.part")
+                val contentType = ProgressiveDownloader(http).download(url, part) { d, t -> progressFor(0)(d, t, null) }
+                finished = part
+                mime = contentType?.substringBefore(';')?.trim()?.lowercase()
+                    ?.takeIf { it.startsWith("video/") || it.startsWith("audio/") }
+                    ?: format.mimeTypes.firstOrNull() ?: "application/octet-stream"
+                extension = format.extensions.firstOrNull() ?: "bin"
+            }
         }
 
         val isAudio = mime.startsWith("audio/") || job.audioOnly

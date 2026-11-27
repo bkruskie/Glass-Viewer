@@ -34,6 +34,7 @@ include(":core:network")
 // Media engines (pure Kotlin where possible, for future iOS / desktop reuse)
 include(":media:detection")
 include(":media:download")
+include(":media:playback")
 
 // Features
 include(":feature:browser")

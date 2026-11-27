@@ -48,6 +48,10 @@ data class DownloadEntity(
     val resumeState: String? = null,
     val mimeType: String? = null,
     @ColumnInfo(defaultValue = "0") val audioOnly: Boolean = false,
+    // ---- v3 ----
+    /** Requested quality for manifests that list several (DASH). */
+    val targetHeight: Int? = null,
+    val targetBitrate: Long? = null,
 )
 
 /** Anything in the user's library: downloads and imported local files. */

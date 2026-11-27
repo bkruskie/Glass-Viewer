@@ -25,7 +25,7 @@ object DownloadSupport {
         return when {
             isProgressive(format) -> null
             format == MediaFormat.HLS -> null
-            format == MediaFormat.DASH -> "Saving DASH streams is coming in a later update."
+            format == MediaFormat.DASH -> null
             else -> "This format can't be saved."
         }
     }

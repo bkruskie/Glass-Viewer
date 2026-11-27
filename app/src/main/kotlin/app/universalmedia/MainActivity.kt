@@ -1,13 +1,18 @@
 package app.universalmedia
 
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.universalmedia.core.model.AppSettings
 import app.universalmedia.core.ui.theme.UniversalMediaTheme
@@ -24,6 +29,10 @@ class MainActivity : ComponentActivity() {
     /** A link handed to us by another app (share sheet or "open with"). */
     private val incomingUrl = MutableStateFlow<String?>(null)
 
+    private var inPictureInPicture by mutableStateOf(false)
+
+    private val container: AppContainer get() = (application as UniversalMediaApp).container
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -32,7 +41,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handleIntent(intent)
 
-        val container = (application as UniversalMediaApp).container
         setContent {
             val settings by container.settings.settings.collectAsStateWithLifecycle(AppSettings())
             val pending by incomingUrl.collectAsStateWithLifecycle()
@@ -42,6 +50,7 @@ class MainActivity : ComponentActivity() {
                     webViewPool = webViewPool,
                     incomingUrl = pending,
                     onIncomingConsumed = { incomingUrl.value = null },
+                    inPictureInPicture = inPictureInPicture,
                 )
             }
         }
@@ -52,8 +61,33 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    /** Leaving the app while a video plays on the Player screen shrinks it to picture-in-picture. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        val playback = container.playback
+        if (!playback.isPlayerScreenVisible || !playback.isPlayingVideo()) return
+        val size = playback.player.videoSize
+        val ratio = if (size.width > 0 && size.height > 0) {
+            val r = size.width.toFloat() / size.height
+            when {
+                r > 2.39f -> Rational(239, 100)
+                r < 0.42f -> Rational(42, 100)
+                else -> Rational(size.width, size.height)
+            }
+        } else {
+            Rational(16, 9)
+        }
+        runCatching { enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(ratio).build()) }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPictureInPicture = isInPictureInPictureMode
+    }
+
     override fun onDestroy() {
         webViewPool.destroyAll()
+        if (isFinishing) container.playback.stop()
         super.onDestroy()
     }
 

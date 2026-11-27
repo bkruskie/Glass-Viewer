@@ -96,6 +96,8 @@ class MediaDownloadManager(
                 resumeState = null,
                 mimeType = null,
                 audioOnly = variant?.audioOnly ?: false,
+                targetHeight = variant?.height,
+                targetBitrate = variant?.bitrate,
             ),
         )
         schedule(id, ExistingWorkPolicy.REPLACE)

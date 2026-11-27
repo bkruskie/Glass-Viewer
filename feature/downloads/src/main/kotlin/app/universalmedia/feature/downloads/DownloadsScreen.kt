@@ -67,7 +67,11 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DownloadsScreen(manager: MediaDownloadManager, onOpenBrowser: () -> Unit) {
+fun DownloadsScreen(
+    manager: MediaDownloadManager,
+    onOpenBrowser: () -> Unit,
+    onPlay: (DownloadEntity) -> Unit = {},
+) {
     val downloads by remember(manager) { manager.observe() }.collectAsStateWithLifecycle(emptyList())
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -114,6 +118,7 @@ fun DownloadsScreen(manager: MediaDownloadManager, onOpenBrowser: () -> Unit) {
                         onCancel = { scope.launch { manager.cancel(item.id) } },
                         onRemove = { scope.launch { manager.remove(item.id) } },
                         onOpen = { openFile(context, item) },
+                        onPlay = { onPlay(item) },
                     )
                 }
             }
@@ -131,6 +136,7 @@ private fun DownloadRow(
     onCancel: () -> Unit,
     onRemove: () -> Unit,
     onOpen: () -> Unit,
+    onPlay: () -> Unit,
 ) {
     val status = item.statusEnum
     var menu by remember { mutableStateOf(false) }
@@ -145,7 +151,7 @@ private fun DownloadRow(
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .clickable(enabled = status == DownloadStatus.COMPLETED, onClick = onOpen)
+            .clickable(enabled = status == DownloadStatus.COMPLETED, onClick = onPlay)
             .padding(start = 14.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

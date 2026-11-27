@@ -88,7 +88,7 @@ class HlsSegmentListTest {
         )
         assertNull(DownloadSupport.reasonNotSupported(media(MediaFormat.MP4), null))
         assertNull(DownloadSupport.reasonNotSupported(media(MediaFormat.HLS), null))
-        assertNotNull(DownloadSupport.reasonNotSupported(media(MediaFormat.DASH), null))
+        assertNull(DownloadSupport.reasonNotSupported(media(MediaFormat.DASH), null))
         assertNotNull(DownloadSupport.reasonNotSupported(media(MediaFormat.MP4, Availability.PROTECTED), null))
     }
 }

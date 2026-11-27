@@ -1,7 +1,11 @@
 package app.universalmedia.navigation
 
 import android.Manifest
+import android.app.Activity
 import android.app.Application
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.widget.Toast
@@ -37,7 +41,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import app.universalmedia.media.playback.PlayRequest
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.media.download.MediaDownloadManager
@@ -82,6 +91,7 @@ fun UniversalMediaRoot(
     webViewPool: WebViewPool,
     incomingUrl: String?,
     onIncomingConsumed: () -> Unit,
+    inPictureInPicture: Boolean = false,
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -127,6 +137,31 @@ fun UniversalMediaRoot(
         }
     }
 
+    // ---- Playing media ------------------------------------------------------------
+    var playerFullscreen by remember { mutableStateOf(false) }
+    val playback = container.playback
+    val playAndShow: (PlayRequest) -> Unit = { request ->
+        playback.play(request)
+        navController.navigateTopLevel(TopDestination.PLAYER.route)
+    }
+    // Fullscreen video: landscape, no system bars.
+    DisposableEffect(playerFullscreen) {
+        val activity = context.findActivity()
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        if (playerFullscreen) {
+            controller?.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        onDispose {
+            if (playerFullscreen) {
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+    }
+
     LaunchedEffect(incomingUrl) {
         if (incomingUrl != null) {
             browserViewModel.openShared(incomingUrl)
@@ -137,7 +172,8 @@ fun UniversalMediaRoot(
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val destination = backStackEntry?.destination
-    val showBottomBar = destination?.route != SETTINGS_ROUTE && webViewPool.fullscreen == null
+    val showBottomBar = destination?.route != SETTINGS_ROUTE && webViewPool.fullscreen == null &&
+        !playerFullscreen && !inPictureInPicture
     val openSettings = { navController.navigate(SETTINGS_ROUTE) { launchSingleTop = true } }
 
     Box(Modifier.fillMaxSize()) {
@@ -176,22 +212,56 @@ fun UniversalMediaRoot(
                         webViewPool,
                         onOpenSettings = openSettings,
                         onSave = { media, variant -> save(media, variant, false) },
+                        onPlay = { media, variant ->
+                            val format = variant?.format ?: media.format
+                            playAndShow(
+                                PlayRequest(
+                                    uri = variant?.url ?: media.mediaUrl,
+                                    title = media.title ?: "Video",
+                                    mimeType = PlayRequest.mimeFor(format),
+                                    referer = media.pageUrl,
+                                ),
+                            )
+                        },
                     )
                 }
                 composable(TopDestination.DOWNLOADS.route) {
                     DownloadsScreen(
                         container.downloads,
                         onOpenBrowser = { navController.navigateTopLevel(TopDestination.BROWSER.route) },
+                        onPlay = { item ->
+                            item.destinationUri?.let { uri ->
+                                playAndShow(PlayRequest(uri = uri, title = item.title, mimeType = item.mimeType))
+                            }
+                        },
                     )
                 }
                 composable(TopDestination.PLAYER.route) {
                     PlayerScreen(
-                        container.database.mediaItemDao(),
+                        playback = playback,
+                        mediaItemDao = container.database.mediaItemDao(),
+                        fullscreen = playerFullscreen,
+                        inPictureInPicture = inPictureInPicture,
+                        onFullscreenChange = { playerFullscreen = it },
                         onOpenLibrary = { navController.navigateTopLevel(TopDestination.LIBRARY.route) },
                     )
                 }
                 composable(TopDestination.LIBRARY.route) {
-                    LibraryScreen(libraryViewModel, onOpenSettings = openSettings)
+                    LibraryScreen(
+                        libraryViewModel,
+                        onOpenSettings = openSettings,
+                        onPlay = { item ->
+                            playAndShow(
+                                PlayRequest(
+                                    uri = item.uri,
+                                    title = item.title,
+                                    mimeType = item.mimeType,
+                                    libraryItemId = item.id,
+                                    startPositionMs = item.playbackPositionMs,
+                                ),
+                            )
+                        },
+                    )
                 }
                 composable(TopDestination.CONNECT.route) {
                     ConnectScreen(onOpenSettings = openSettings)
@@ -227,6 +297,12 @@ fun UniversalMediaRoot(
             dismissButton = { TextButton(onClick = { duplicate = null }) { Text("Cancel") } },
         )
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 private fun NavHostController.navigateTopLevel(route: String) {

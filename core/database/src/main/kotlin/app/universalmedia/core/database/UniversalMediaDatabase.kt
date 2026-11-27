@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PlaylistEntity::class,
         PlaylistItemEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class UniversalMediaDatabase : RoomDatabase() {
@@ -39,10 +39,18 @@ abstract class UniversalMediaDatabase : RoomDatabase() {
             }
         }
 
+        /** v3: requested quality for DASH downloads. */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE downloads ADD COLUMN targetHeight INTEGER")
+                db.execSQL("ALTER TABLE downloads ADD COLUMN targetBitrate INTEGER")
+            }
+        }
+
         fun create(context: Context): UniversalMediaDatabase =
             Room.databaseBuilder(context.applicationContext, UniversalMediaDatabase::class.java, NAME)
                 // Every schema change ships an explicit Migration; never destructive.
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
 
         fun inMemory(context: Context): UniversalMediaDatabase =

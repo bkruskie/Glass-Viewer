@@ -12,8 +12,8 @@ android {
         applicationId = "app.universalmedia"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0-m3"
+        versionCode = 4
+        versionName = "0.4.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -51,6 +51,7 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":media:detection"))
     implementation(project(":media:download"))
+    implementation(project(":media:playback"))
     implementation(project(":feature:browser"))
     implementation(project(":feature:downloads"))
     implementation(project(":feature:player"))

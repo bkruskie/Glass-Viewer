@@ -73,7 +73,7 @@ import app.universalmedia.core.ui.components.GlowIcon
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit) {
+fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit, onPlay: (MediaItemEntity) -> Unit = {}) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -170,6 +170,7 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit) {
                     items(state.items, key = { it.id }) { item ->
                         MediaRow(
                             item = item,
+                            onPlay = { onPlay(item) },
                             onOpen = { openExternally(context, item) },
                             onFavorite = { viewModel.toggleFavorite(item) },
                             onRemove = { viewModel.remove(item) },
@@ -182,7 +183,13 @@ fun LibraryScreen(viewModel: LibraryViewModel, onOpenSettings: () -> Unit) {
 }
 
 @Composable
-private fun MediaRow(item: MediaItemEntity, onOpen: () -> Unit, onFavorite: () -> Unit, onRemove: () -> Unit) {
+private fun MediaRow(
+    item: MediaItemEntity,
+    onPlay: () -> Unit,
+    onOpen: () -> Unit,
+    onFavorite: () -> Unit,
+    onRemove: () -> Unit,
+) {
     val isAudio = item.mimeType?.startsWith("audio") == true
     var menu by remember { mutableStateOf(false) }
     Row(
@@ -190,7 +197,7 @@ private fun MediaRow(item: MediaItemEntity, onOpen: () -> Unit, onFavorite: () -
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.medium)
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .clickable(onClick = onOpen)
+            .clickable(onClick = onPlay)
             .padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -228,7 +235,7 @@ private fun MediaRow(item: MediaItemEntity, onOpen: () -> Unit, onFavorite: () -
     }
 }
 
-/** Until the built-in player ships, hand the file to another app. */
+/** Hands the file to another app (e.g. to cast or edit it). */
 private fun openExternally(context: Context, item: MediaItemEntity) {
     val intent = Intent(Intent.ACTION_VIEW)
         .setDataAndType(Uri.parse(item.uri), item.mimeType ?: "video/*")

@@ -1,9 +1,5 @@
 package app.universalmedia.feature.browser
 
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,7 +22,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -70,6 +66,7 @@ internal fun BrowserSheets(
     onDismiss: () -> Unit,
     viewModel: BrowserViewModel,
     onSave: (DetectedMedia, MediaVariant?) -> Unit,
+    onPlay: (DetectedMedia, MediaVariant?) -> Unit,
 ) {
     if (sheet == BrowserSheet.NONE) return
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = sheet == BrowserSheet.MEDIA)
@@ -89,6 +86,7 @@ internal fun BrowserSheets(
                 media = state.activeTab.detected,
                 onDismissItem = { viewModel.dismissDetected(state.activeTabId, it) },
                 onSave = onSave,
+                onPlay = onPlay,
             )
             BrowserSheet.BOOKMARKS -> LinkListSheet(
                 title = "Bookmarks",
@@ -176,6 +174,7 @@ private fun MediaSheet(
     media: List<DetectedMedia>,
     onDismissItem: (String) -> Unit,
     onSave: (DetectedMedia, MediaVariant?) -> Unit,
+    onPlay: (DetectedMedia, MediaVariant?) -> Unit,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -197,7 +196,7 @@ private fun MediaSheet(
                     clipboard.setText(AnnotatedString(url))
                     Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
                 },
-                onOpenWith = { url -> openWith(context, item, url) },
+                onPlay = { variant -> onPlay(item, variant) },
                 onSave = { variant -> onSave(item, variant) },
                 onDismiss = { onDismissItem(item.id) },
             )
@@ -209,7 +208,7 @@ private fun MediaSheet(
 private fun MediaCard(
     item: DetectedMedia,
     onCopy: (String) -> Unit,
-    onOpenWith: (String) -> Unit,
+    onPlay: (MediaVariant?) -> Unit,
     onSave: (MediaVariant?) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -309,10 +308,10 @@ private fun MediaCard(
                 Text("Copy link")
             }
             if (item.availability == Availability.SUPPORTED) {
-                TextButton(onClick = { onOpenWith(chosenUrl) }) {
-                    Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                TextButton(onClick = { onPlay(chosen) }) {
+                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("Open")
+                    Text("Play")
                 }
             }
         }
@@ -372,15 +371,3 @@ private fun LinkListSheet(
 }
 
 private const val MAX_VARIANTS_SHOWN = 8
-
-private fun openWith(context: Context, item: DetectedMedia, url: String) {
-    val format = item.variants.firstOrNull { it.url == url }?.format ?: item.format
-    val mime = (if (format == item.format) item.mimeType?.substringBefore(';') else null)
-        ?: format.mimeTypes.firstOrNull() ?: "video/*"
-    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime)
-    try {
-        context.startActivity(Intent.createChooser(intent, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "No app can open this media", Toast.LENGTH_SHORT).show()
-    }
-}

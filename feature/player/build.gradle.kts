@@ -20,6 +20,8 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:database"))
     implementation(project(":core:datastore"))
+    implementation(project(":media:playback"))
+    implementation(libs.androidx.media3.ui)
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

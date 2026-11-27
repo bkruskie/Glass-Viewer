@@ -14,6 +14,7 @@ import app.universalmedia.media.detection.adapters.PeerTubeAdapter
 import app.universalmedia.media.download.DownloadEnvironment
 import app.universalmedia.media.download.DownloadEnvironmentProvider
 import app.universalmedia.media.download.MediaDownloadManager
+import app.universalmedia.media.playback.PlaybackManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,6 +62,25 @@ class AppContainer(private val application: Application) {
     }
 
     val downloads: MediaDownloadManager by lazy { MediaDownloadManager(downloadEnvironment) }
+
+    /** Player HTTP: adds the in-app browser's cookies so signed-in videos play. */
+    private val playerHttpClient: OkHttpClient by lazy {
+        httpClient.newBuilder()
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val cookie = browserCookies(request.url.toString())
+                chain.proceed(
+                    if (cookie.isNullOrBlank() || request.header("Cookie") != null) request
+                    else request.newBuilder().header("Cookie", cookie).build(),
+                )
+            }
+            .build()
+    }
+
+    /** App-wide player; create and use on the main thread. */
+    val playback: PlaybackManager by lazy {
+        PlaybackManager(application, playerHttpClient, { browserUserAgent }, database.mediaItemDao(), appScope)
+    }
 
     /** Site adapters are registered here, most specific first. The generic adapter is always the fallback. */
     val detectionEngine: MediaDetectionEngine by lazy {

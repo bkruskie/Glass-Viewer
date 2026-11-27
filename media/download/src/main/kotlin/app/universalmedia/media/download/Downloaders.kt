@@ -58,10 +58,77 @@ internal class ProgressiveDownloader(private val http: Http) {
         }
 }
 
+/** One piece of a segmented stream: a URL plus an optional Range header. */
+internal data class Piece(val url: String, val range: String? = null)
+
 /**
- * HLS download: picks the media playlist, fetches segments a few at a time,
- * decrypts standard AES-128 with the keys the site serves to this session,
- * and appends them in order. Resumable at segment granularity.
+ * Downloads an init section and an ordered list of segments into one file,
+ * a few segments at a time, optionally transforming each (decryption).
+ * Resume state is "index:bytesWritten".
+ */
+internal class SegmentDownloader(private val http: Http) {
+
+    suspend fun download(
+        init: Piece?,
+        pieces: List<Piece>,
+        part: File,
+        resumeState: String?,
+        transform: (suspend (index: Int, bytes: ByteArray) -> ByteArray)? = null,
+        onProgress: suspend (done: Long, estimatedTotal: Long?, state: String) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        if (pieces.isEmpty()) throw DownloadException("The stream has no segments.")
+        var index = 0
+        var written = 0L
+        resumeState?.split(':')?.takeIf { it.size == 2 }?.let {
+            index = it[0].toIntOrNull()?.coerceIn(0, pieces.size) ?: 0
+            written = it[1].toLongOrNull() ?: 0L
+        }
+        if (!part.exists() || part.length() < written) {
+            index = 0
+            written = 0L
+        }
+        RandomAccessFile(part, "rw").use { it.setLength(written) }
+
+        FileOutputStream(part, true).use { out ->
+            if (written == 0L && init != null) {
+                val bytes = retrying { http.bytes(init.url, init.range) }
+                out.write(bytes)
+                written += bytes.size
+                onProgress(written, null, "0:$written")
+            }
+            while (index < pieces.size) {
+                ensureActive()
+                val start = index
+                val window = pieces.subList(start, minOf(start + PARALLEL_SEGMENTS, pieces.size))
+                val data = coroutineScope {
+                    window.mapIndexed { offset, piece ->
+                        async {
+                            val raw = retrying { http.bytes(piece.url, piece.range) }
+                            transform?.invoke(start + offset, raw) ?: raw
+                        }
+                    }.awaitAll()
+                }
+                for (bytes in data) {
+                    out.write(bytes)
+                    written += bytes.size
+                }
+                out.flush()
+                index += window.size
+                val estimate = if (index == pieces.size) written else written * pieces.size / index
+                onProgress(written, estimate, "$index:$written")
+            }
+        }
+        part
+    }
+
+    private companion object {
+        const val PARALLEL_SEGMENTS = 4
+    }
+}
+
+/**
+ * HLS download of one media playlist (a master picks its best variant):
+ * standard AES-128 is decrypted with the keys the site serves to this session.
  */
 internal class HlsDownloader(private val http: Http) {
 
@@ -72,49 +139,20 @@ internal class HlsDownloader(private val http: Http) {
         part: File,
         resumeState: String?,
         onProgress: suspend (done: Long, estimatedTotal: Long?, state: String) -> Unit,
-    ): Output = withContext(Dispatchers.IO) {
+    ): Output {
         val list = loadSegmentList(playlistUrl)
         list.unsupportedReason?.let { throw DownloadException(it) }
-        val segments = list.segments
-        if (segments.isEmpty()) throw DownloadException("The stream has no segments.")
-
-        var index = 0
-        var written = 0L
-        resumeState?.split(':')?.takeIf { it.size == 2 }?.let {
-            index = it[0].toIntOrNull()?.coerceIn(0, segments.size) ?: 0
-            written = it[1].toLongOrNull() ?: 0L
-        }
-        if (!part.exists() || part.length() < written) {
-            index = 0
-            written = 0L
-        }
-        RandomAccessFile(part, "rw").use { it.setLength(written) }
-
         val keys = ConcurrentHashMap<String, ByteArray>()
-        FileOutputStream(part, true).use { out ->
-            if (written == 0L && list.initUrl != null) {
-                val init = retrying { http.bytes(list.initUrl!!, list.initByteRange?.rangeHeader) }
-                out.write(init)
-                written += init.size
-                onProgress(written, null, "0:$written")
-            }
-            while (index < segments.size) {
-                ensureActive()
-                val window = segments.subList(index, minOf(index + PARALLEL_SEGMENTS, segments.size))
-                val data = coroutineScope {
-                    window.map { segment -> async { fetchSegment(segment, keys) } }.awaitAll()
-                }
-                for (bytes in data) {
-                    out.write(bytes)
-                    written += bytes.size
-                }
-                out.flush()
-                index += window.size
-                val estimate = written * segments.size / index
-                onProgress(written, if (index == segments.size) written else estimate, "$index:$written")
-            }
-        }
-        Output(part, list.isFragmentedMp4)
+        val segments = list.segments
+        val file = SegmentDownloader(http).download(
+            init = list.initUrl?.let { Piece(it, list.initByteRange?.rangeHeader) },
+            pieces = segments.map { Piece(it.url, it.byteRange?.rangeHeader) },
+            part = part,
+            resumeState = resumeState,
+            transform = { index, bytes -> decrypt(segments[index], bytes, keys) },
+            onProgress = onProgress,
+        )
+        return Output(file, list.isFragmentedMp4)
     }
 
     private suspend fun loadSegmentList(url: String): HlsSegmentList {
@@ -128,8 +166,7 @@ internal class HlsDownloader(private val http: Http) {
         return HlsSegmentList.parse(childText, childUrl) ?: throw DownloadException("Unreadable stream playlist.")
     }
 
-    private suspend fun fetchSegment(segment: HlsSegment, keys: ConcurrentHashMap<String, ByteArray>): ByteArray {
-        val raw = retrying { http.bytes(segment.url, segment.byteRange?.rangeHeader) }
+    private suspend fun decrypt(segment: HlsSegment, raw: ByteArray, keys: ConcurrentHashMap<String, ByteArray>): ByteArray {
         val key = segment.key ?: return raw
         val keyBytes = keys[key.uri] ?: retrying { http.bytes(key.uri) }.also { keys[key.uri] = it }
         if (keyBytes.size != 16) throw DownloadException("The stream's key is invalid.")
@@ -142,8 +179,19 @@ internal class HlsDownloader(private val http: Http) {
             throw DownloadException("A segment couldn't be decrypted.")
         }
     }
+}
 
-    private companion object {
-        const val PARALLEL_SEGMENTS = 4
+/** Finds the video playlist and, if the stream carries audio separately, the audio playlist. */
+internal suspend fun resolveHlsTracks(http: Http, url: String, masterUrl: String): Pair<String, String?> {
+    val (text, finalUrl) = retrying { http.text(url) }
+    val parsed = HlsPlaylistParser.parse(text, finalUrl)
+    if (parsed is HlsPlaylist.Master) {
+        val best = parsed.variants.firstOrNull { !it.audioOnly } ?: parsed.variants.firstOrNull()
+            ?: throw DownloadException("The stream lists no qualities.")
+        return best.url to parsed.audioFor(best.url)
     }
+    if (masterUrl == url) return url to null
+    val master = runCatching { retrying { http.text(masterUrl) } }.getOrNull()
+        ?.let { (t, u) -> HlsPlaylistParser.parse(t, u) as? HlsPlaylist.Master }
+    return url to master?.audioFor(url)
 }
