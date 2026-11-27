@@ -75,6 +75,7 @@ class SettingsRepository(context: Context) {
         this[Keys.wifiOnlyDownloads] = s.wifiOnlyDownloads
         this[Keys.maxConcurrentDownloads] = s.maxConcurrentDownloads.coerceIn(1, 6)
         this[Keys.pureBlackTheme] = s.pureBlackTheme
-        if (s.downloadTreeUri != null) this[Keys.downloadTreeUri] = s.downloadTreeUri else remove(Keys.downloadTreeUri)
+        val tree = s.downloadTreeUri
+        if (tree != null) this[Keys.downloadTreeUri] = tree else remove(Keys.downloadTreeUri)
     }
 }
