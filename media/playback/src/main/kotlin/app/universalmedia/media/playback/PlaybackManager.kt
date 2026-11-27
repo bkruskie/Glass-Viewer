@@ -87,6 +87,25 @@ class PlaybackManager(
     /** A user-facing explanation when playback fails or can't start; null when all is well. */
     val problem: StateFlow<String?> = _problem.asStateFlow()
 
+    private val _speed = MutableStateFlow(1f)
+
+    /** Current playback speed (0.1× super slow motion up to 4×). */
+    val speed: StateFlow<Float> = _speed.asStateFlow()
+
+    fun setSpeed(value: Float) {
+        _speed.value = value
+        exo?.setPlaybackSpeed(value)
+    }
+
+    /** Pauses and moves one video frame forward (+1) or back (-1). */
+    fun stepFrame(direction: Int) {
+        val p = exo ?: return
+        p.pause()
+        val fps = p.videoFormat?.frameRate?.takeIf { it > 0f } ?: 30f
+        val step = (1000f / fps).toLong().coerceAtLeast(1L)
+        p.seekTo((p.currentPosition + direction * step).coerceAtLeast(0L))
+    }
+
     /** Set by the Player screen; picture-in-picture only starts from there. */
     @Volatile
     var isPlayerScreenVisible: Boolean = false
@@ -107,7 +126,9 @@ class PlaybackManager(
             .setMediaMetadata(MediaMetadata.Builder().setTitle(request.title).build())
             .build()
         val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http)).createMediaSource(item)
+        _speed.value = 1f
         player.apply {
+            setPlaybackSpeed(1f)
             setMediaSource(source, request.startPositionMs)
             prepare()
             playWhenReady = true

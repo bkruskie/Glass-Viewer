@@ -5,7 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.content.res.Configuration
+import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.setValue
@@ -97,6 +102,7 @@ fun PlayerScreen(
     DisposableEffect(playback) {
         playback.isPlayerScreenVisible = true
         onDispose {
+            VideoGestures.restoreBrightness(context.findActivity()?.window)
             playback.isPlayerScreenVisible = false
             playback.savePosition()
             onFullscreenChange(false)
@@ -235,15 +241,44 @@ private fun VideoSurface(
     onFullscreenChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    var controlsVisible by remember { mutableStateOf(true) }
+    var indicator by remember { mutableStateOf<String?>(null) }
+    var indicatorTick by remember { mutableIntStateOf(0) }
+    var playerView by remember { mutableStateOf<PlayerView?>(null) }
+    var gestures by remember { mutableStateOf<VideoGestures?>(null) }
+
+    LaunchedEffect(indicatorTick) {
+        if (indicator != null) {
+            delay(900)
+            indicator = null
+        }
+    }
+
     Box(modifier) {
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                (LayoutInflater.from(ctx).inflate(R.layout.um_player_view, null) as PlayerView).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     setShowSubtitleButton(true)
                     setShowNextButton(false)
                     setShowPreviousButton(false)
                     keepScreenOn = true
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { visibility -> controlsVisible = visibility == View.VISIBLE },
+                    )
+                    val g = VideoGestures(
+                        view = this,
+                        player = { playback.player },
+                        window = { context.findActivity()?.window },
+                        show = { text ->
+                            indicator = text
+                            indicatorTick++
+                        },
+                    )
+                    setOnTouchListener(g)
+                    gestures = g
+                    playerView = this
                 }
             },
             update = { view ->
@@ -252,20 +287,27 @@ private fun VideoSurface(
                 view.setFullscreenButtonState(fullscreen)
                 view.setFullscreenButtonClickListener { wantFullscreen -> onFullscreenChange(wantFullscreen) }
             },
-            onRelease = { view -> view.player = null },
+            onRelease = { view ->
+                view.player = null
+                view.setOnTouchListener(null)
+            },
             modifier = Modifier.fillMaxSize(),
         )
-    }
-}
-
-private fun openElsewhere(context: Context, request: PlayRequest) {
-    val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(Uri.parse(request.uri), request.mimeType ?: "video/*")
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    try {
-        context.startActivity(Intent.createChooser(intent, request.title))
-    } catch (e: ActivityNotFoundException) {
-        Toast.makeText(context, "No other app can open this", Toast.LENGTH_SHORT).show()
+        if (showControls && controlsVisible) {
+            VideoToolbar(playback, playerView, gestures, Modifier.align(Alignment.TopEnd))
+        }
+        indicator?.let {
+            Text(
+                it,
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
     }
 }
 
