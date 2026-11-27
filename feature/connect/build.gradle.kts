@@ -22,6 +22,7 @@ dependencies {
     implementation(project(":core:datastore"))
     implementation(project(":media:cast"))
     implementation(project(":media:mirror"))
+    implementation(project(":media:transfer"))
 
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)

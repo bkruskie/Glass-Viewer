@@ -15,6 +15,7 @@ junit = "4.13.2"
 androidxTestJunit = "1.2.1"
 androidxTestRunner = "1.6.2"
 okhttp = "4.12.0"
+zxing = "3.5.3"
 work = "2.10.0"
 media3 = "1.5.1"
 castFramework = "22.0.0"
@@ -60,6 +61,8 @@ androidx-mediarouter = { group = "androidx.mediarouter", name = "mediarouter", v
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-test-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

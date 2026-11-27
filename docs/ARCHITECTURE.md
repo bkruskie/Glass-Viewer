@@ -332,7 +332,9 @@ Limits: apps using `FLAG_SECURE` and DRM video appear black (enforced by Android
 
 ## 14. Local network transfer (M7)
 
-Discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-digit code / QR containing its TLS certificate fingerprint; the sender pins it. Transfers are HTTPS over the LAN with chunked, resumable uploads (Range/offset), progress and cancellation. A computer without the app uses a browser page served by the phone (upload/download), so "phone ↔ computer" works before any desktop companion exists.
+**Implemented (v0.12):** `media:transfer` / `TransferServer`, the browser path. The phone serves one page at `http://<ip>:<port>/<18-byte random token>/` (shown as text and QR). The page lists library files (downloads support Range so browsers can resume) and sends files to the phone with one `PUT …/up?name=` per file, streamed straight into MediaStore (Movies/Music/Pictures/Download › Universal Media; app folder + FileProvider on Android 8–9). Video and audio are added to the library. Names are sanitised, free space is checked first, and sharing stops after 20 idle minutes or on Stop. Plain HTTP on the LAN; the unguessable path is the access control.
+
+**Planned:** discovery via mDNS (`_universalmedia._tcp`). Pairing: the receiver shows a 6-digit code / QR containing its TLS certificate fingerprint; the sender pins it. Transfers are HTTPS over the LAN with chunked, resumable uploads (Range/offset), progress and cancellation. A computer without the app uses a browser page served by the phone (upload/download), so "phone ↔ computer" works before any desktop companion exists.
 
 ---
 

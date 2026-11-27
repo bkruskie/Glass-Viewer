@@ -77,15 +77,11 @@ import app.universalmedia.media.cast.CastItem
 import app.universalmedia.media.cast.CastKind
 import app.universalmedia.media.cast.CastManager
 import app.universalmedia.media.mirror.ReceiverDiscovery
+import app.universalmedia.media.transfer.TransferServer
 
 private data class InfoCard(val key: String, val icon: ImageVector, val title: String, val subtitle: String, val details: String)
 
 private val moreWays = listOf(
-    InfoCard(
-        "transfer", Icons.Rounded.SwapHoriz, "Send to a device",
-        "Coming soon: move files between phones and computers on your Wi-Fi.",
-        "Transfers will go directly between devices on your network with a one-time pairing code. Nothing passes through the internet.",
-    ),
     InfoCard(
         "hdmi", Icons.Rounded.SettingsInputHdmi, "Cable (HDMI)",
         "Works today with a USB-C to HDMI adapter",
@@ -98,6 +94,7 @@ private val moreWays = listOf(
 fun ConnectScreen(
     cast: CastManager,
     mirrorDiscovery: ReceiverDiscovery,
+    transfer: TransferServer,
     mediaItemDao: MediaItemDao,
     nowPlaying: CastItem?,
     pendingItem: CastItem?,
@@ -206,6 +203,7 @@ fun ConnectScreen(
 
             SectionHeader("More ways")
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TransferCard(transfer)
                 moreWays.forEach { card ->
                     FeatureCard(card.icon, card.title, card.subtitle, onClick = { openInfo = card.key })
                 }

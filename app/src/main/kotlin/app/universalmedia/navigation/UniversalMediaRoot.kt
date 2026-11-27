@@ -350,6 +350,7 @@ fun UniversalMediaRoot(
                     ConnectScreen(
                         cast = container.cast,
                         mirrorDiscovery = container.mirrorDiscovery,
+                        transfer = container.transfer,
                         mediaItemDao = container.database.mediaItemDao(),
                         nowPlaying = playingNow?.let { CastItem(it.title, it.uri, it.mimeType) },
                         pendingItem = pendingCast,

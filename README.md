@@ -14,7 +14,8 @@ A free, private, all-in-one media app for Android: browse, detect, download, pla
 - **Settings**: detection, search engine, JavaScript, cookies, download preferences, pure-black theme, clear browsing data.
 - **Downloads**: MP4, WebM, MKV, audio, HLS (incl. standard encryption and separate audio) and DASH; pause, resume, retry, Wi-Fi only; saved to Movies/Music › Universal Media or a folder you choose, and added to the library.
 - **Built-in player**: plays everything above, with speed, subtitles, audio tracks, fullscreen, picture-in-picture and resume.
-- Connect (casting, mirroring, transfer) is next.
+- **Connect**: play on Chromecast, DLNA smart TVs, Roku (experimental) or any TV browser; see every TV on your Wi-Fi with the step that works for it; mirror the screen to the receiver app, a browser or Smart View.
+- **Wi-Fi transfer**: any computer or phone on the same Wi-Fi opens an address (or scans a QR code) in its browser to download your library or send files to the phone. No app, account or cloud on the other side.
 
 ## Build
 

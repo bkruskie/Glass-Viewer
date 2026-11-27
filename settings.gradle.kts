@@ -39,6 +39,7 @@ include(":media:playback")
 include(":media:cast")
 include(":media:mirror")
 include(":media:mirror-protocol")
+include(":media:transfer")
 
 // Features
 include(":feature:browser")

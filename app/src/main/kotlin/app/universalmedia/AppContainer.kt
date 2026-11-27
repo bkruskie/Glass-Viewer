@@ -21,6 +21,7 @@ import app.universalmedia.media.mirror.ReceiverDiscovery
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
@@ -82,6 +83,38 @@ class AppContainer(private val application: Application) {
 
     /** TV casting (Google Cast, DLNA, TV browser); create and use on the main thread. */
     val cast: CastManager by lazy { CastManager(application, httpClient, appScope) }
+
+    /** Wi-Fi transfer: other devices open a web address to swap files with the library. */
+    val transfer: app.universalmedia.media.transfer.TransferServer by lazy {
+        val dao = database.mediaItemDao()
+        app.universalmedia.media.transfer.TransferServer(
+            context = application,
+            scope = appScope,
+            files = {
+                dao.observeAll().first().map { item ->
+                    val ext = item.mimeType?.let { android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }
+                    val name = if (ext != null && !item.title.endsWith(".$ext", ignoreCase = true)) "${item.title}.$ext" else item.title
+                    app.universalmedia.media.transfer.SharedFile(item.id.toString(), name, item.uri, item.mimeType, item.sizeBytes)
+                }
+            },
+            onReceived = { file ->
+                if (file.mimeType.startsWith("video") || file.mimeType.startsWith("audio")) {
+                    dao.insertAll(
+                        listOf(
+                            app.universalmedia.core.database.MediaItemEntity(
+                                uri = file.uri.toString(),
+                                title = file.name.substringBeforeLast('.'),
+                                mimeType = file.mimeType,
+                                sizeBytes = file.sizeBytes,
+                                durationMs = null,
+                                addedAt = System.currentTimeMillis(),
+                            ),
+                        ),
+                    )
+                }
+            },
+        )
+    }
 
     /** Finds TV receiver apps for screen mirroring. */
     val mirrorDiscovery: ReceiverDiscovery by lazy { ReceiverDiscovery(application) }
