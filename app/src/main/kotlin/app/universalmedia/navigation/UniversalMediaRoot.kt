@@ -2,6 +2,13 @@ package app.universalmedia.navigation
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.Row
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.universalmedia.core.database.DownloadEntity
+import app.universalmedia.core.model.DownloadStatus
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
@@ -165,6 +172,20 @@ fun UniversalMediaRoot(
         }
     }
 
+    // When a download finishes while the app is open, ask how to watch it.
+    val allDownloads by remember(container) { container.downloads.observe() }.collectAsStateWithLifecycle(emptyList())
+    var seenCompleted by remember { mutableStateOf<Set<String>?>(null) }
+    var finishedPrompt by remember { mutableStateOf<DownloadEntity?>(null) }
+    LaunchedEffect(allDownloads) {
+        val done = allDownloads.filter { it.status == DownloadStatus.COMPLETED.name }.map { it.id }.toSet()
+        val before = seenCompleted
+        if (before != null) {
+            allDownloads.firstOrNull { it.id in done && it.id !in before && it.destinationUri != null }
+                ?.let { finishedPrompt = it }
+        }
+        seenCompleted = done
+    }
+
     LaunchedEffect(incomingUrl) {
         if (incomingUrl != null) {
             browserViewModel.openShared(incomingUrl)
@@ -286,6 +307,28 @@ fun UniversalMediaRoot(
         FullscreenVideoHost(webViewPool)
     }
 
+    finishedPrompt?.let { item ->
+        val uri = item.destinationUri
+        AlertDialog(
+            onDismissRequest = { finishedPrompt = null },
+            title = { Text("Download finished") },
+            text = { Text("“${item.title}” is saved to your library. How do you want to watch it?") },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = { finishedPrompt = null }) { Text("Later") }
+                    TextButton(onClick = {
+                        finishedPrompt = null
+                        if (uri != null) openWithChooser(context, uri, item.mimeType, item.title)
+                    }) { Text("Other app") }
+                    TextButton(onClick = {
+                        finishedPrompt = null
+                        if (uri != null) playAndShow(PlayRequest(uri = uri, title = item.title, mimeType = item.mimeType))
+                    }) { Text("Play here") }
+                }
+            },
+        )
+    }
+
     // Offer the report from a previous crash (stored on this device only).
     var crashReport by remember { mutableStateOf(CrashReporter.lastCrash(context)) }
     crashReport?.let { report ->
@@ -333,6 +376,18 @@ fun UniversalMediaRoot(
             },
             dismissButton = { TextButton(onClick = { duplicate = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** Lets the user pick any installed player (VLC, MX Player, gallery…) for a saved file. */
+private fun openWithChooser(context: Context, uri: String, mimeType: String?, title: String) {
+    val view = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(Uri.parse(uri), mimeType ?: "video/*")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    try {
+        context.startActivity(Intent.createChooser(view, title))
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "No other app can play this file", Toast.LENGTH_SHORT).show()
     }
 }
 

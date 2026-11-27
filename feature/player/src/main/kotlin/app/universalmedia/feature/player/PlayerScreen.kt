@@ -50,7 +50,8 @@ import app.universalmedia.core.database.MediaItemDao
 import app.universalmedia.core.database.MediaItemEntity
 import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.EmptyState
-import app.universalmedia.core.ui.components.GlowIcon
+import app.universalmedia.core.ui.components.MediaThumbnail
+import androidx.compose.foundation.layout.size
 import app.universalmedia.core.ui.components.SectionHeader
 import app.universalmedia.media.playback.PlayRequest
 import app.universalmedia.media.playback.PlaybackManager
@@ -220,7 +221,11 @@ private fun RecentRow(item: MediaItemEntity, onClick: () -> Unit) {
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlowIcon(Icons.Rounded.PlayCircle, size = 40)
+        MediaThumbnail(
+            item.thumbnailPath,
+            isAudio = item.mimeType?.startsWith("audio") == true,
+            modifier = Modifier.size(width = 80.dp, height = 45.dp),
+        )
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

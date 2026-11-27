@@ -21,6 +21,8 @@ data class MediaVariant(
     val frameRate: Double? = null,
     val estimatedBytes: Long? = null,
     val audioOnly: Boolean = format.kind == MediaKind.AUDIO,
+    /** The stream manifest (HLS master) that lists this quality; needed to find separate audio. */
+    val manifestUrl: String? = null,
 ) {
     /** Human label such as "1080p · 4.2 Mbps". */
     val label: String

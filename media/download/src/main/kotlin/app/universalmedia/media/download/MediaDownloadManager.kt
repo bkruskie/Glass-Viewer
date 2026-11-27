@@ -64,7 +64,10 @@ class MediaDownloadManager(
 
     suspend fun enqueue(media: DetectedMedia, variant: MediaVariant?, allowDuplicate: Boolean = false): EnqueueResult {
         DownloadSupport.reasonNotSupported(media, variant)?.let { return EnqueueResult.NotSupported(it) }
-        if (!allowDuplicate && env.dao.countForUrl(media.mediaUrl) > 0) return EnqueueResult.Duplicate
+        // For a quality picked out of a stream, the manifest that lists it identifies the source
+        // (and lets the worker find a separate audio track).
+        val sourceUrl = variant?.manifestUrl ?: media.mediaUrl
+        if (!allowDuplicate && env.dao.countForUrl(sourceUrl) > 0) return EnqueueResult.Duplicate
 
         val format = variant?.format ?: media.format
         val quality = when {
@@ -79,7 +82,7 @@ class MediaDownloadManager(
         env.dao.upsert(
             DownloadEntity(
                 id = id,
-                mediaUrl = media.mediaUrl,
+                mediaUrl = sourceUrl,
                 pageUrl = media.pageUrl,
                 title = title,
                 fileName = FileNames.build(title, quality, extension),

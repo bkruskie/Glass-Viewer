@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.universalmedia.core.database.MediaItemDao
 import app.universalmedia.core.database.MediaItemEntity
+import app.universalmedia.media.download.Thumbnails
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -61,6 +62,27 @@ class LibraryViewModel(
         LibraryUiState(filtered, all.size, bytes, q, f)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
+    init {
+        makeMissingThumbnails()
+    }
+
+    /** Creates preview images for items that don't have one yet (older items, imports). */
+    private fun makeMissingThumbnails() {
+        viewModelScope.launch {
+            while (true) {
+                val batch = dao.withoutThumbnail(20)
+                if (batch.isEmpty()) break
+                for (item in batch) {
+                    val isAudio = item.mimeType?.startsWith("audio") == true
+                    val path = runCatching {
+                        Thumbnails.create(app, Uri.parse(item.uri), "lib-${item.id}", isAudio)
+                    }.getOrNull()
+                    dao.setThumbnail(item.id, path ?: "") // "" = tried, none available
+                }
+            }
+        }
+    }
+
     fun setQuery(value: String) { query.value = value }
 
     fun setFilter(value: LibraryFilter) { filter.value = value }
@@ -94,6 +116,7 @@ class LibraryViewModel(
                 append(if (inserted == 1) "Added 1 file" else "Added $inserted files")
                 if (skipped > 0) append(" · $skipped already in library")
             }
+            makeMissingThumbnails()
         }
     }
 

@@ -195,7 +195,9 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
         finished.delete()
 
         val now = now()
+        val thumbnail = runCatching { Thumbnails.create(ctx, uri, job.id, isAudio) }.getOrNull()
         env.dao.markCompleted(job.id, uri.toString(), fileName, mime, size, now)
+        env.dao.setThumbnail(job.id, thumbnail)
         env.mediaItemDao.insertAll(
             listOf(
                 MediaItemEntity(
@@ -206,10 +208,26 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
                     durationMs = storage.readDurationMs(uri),
                     addedAt = now,
                     downloadId = job.id,
+                    thumbnailPath = thumbnail,
                 ),
             ),
         )
-        notifyFinished(job.id, job.title, "Saved to your library · ${formatBytes(size)}")
+        notifyFinished(job.id, job.title, "Saved · tap to play · ${formatBytes(size)}", openWithIntent(uri, mime, job.title))
+    }
+
+    /** Tapping the "saved" notification lets the user pick a player for the file. */
+    private fun openWithIntent(uri: android.net.Uri, mime: String, title: String): PendingIntent {
+        val view = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndType(uri, mime)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val chooser = android.content.Intent.createChooser(view, title)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return PendingIntent.getActivity(
+            applicationContext,
+            uri.hashCode(),
+            chooser,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     private suspend fun fail(id: String, message: String, retryable: Boolean): Result {
@@ -251,7 +269,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
     }
 
     @SuppressLint("MissingPermission") // Guarded by areNotificationsEnabled + SecurityException.
-    private fun notifyFinished(jobId: String, title: String, text: String) {
+    private fun notifyFinished(jobId: String, title: String, text: String, tap: PendingIntent? = null) {
         val manager = NotificationManagerCompat.from(applicationContext)
         if (!manager.areNotificationsEnabled()) return
         ensureChannel()
@@ -260,7 +278,7 @@ class DownloadWorker(context: Context, params: WorkerParameters) : CoroutineWork
             .setContentTitle(title)
             .setContentText(text)
             .setAutoCancel(true)
-            .setContentIntent(openAppIntent())
+            .setContentIntent(tap ?: openAppIntent())
             .build()
         try {
             manager.notify(notificationId(jobId) + 1, notification)

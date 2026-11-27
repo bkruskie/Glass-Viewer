@@ -84,3 +84,21 @@ class PageSourceScannerTest {
         )
     }
 }
+
+class ManifestLinkTest {
+    @Test
+    fun groupedStreamQualitiesKeepTheirMaster() = kotlinx.coroutines.runBlocking {
+        val master720 = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"en\",DEFAULT=YES,URI=\"audio.m3u8\"\n" +
+            "#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,AUDIO=\"a\"\nvideo.m3u8\n"
+        val fetcher = FakeFetcher(bodies = mapOf("https://cdn.example/720P_2000K/master.m3u8" to master720))
+        val found = GenericMediaAdapter(fetcher).resolve(
+            ResolveRequest("https://cdn.example/720P_2000K/master.m3u8", app.universalmedia.core.model.DetectionOrigin.IN_APP_BROWSER),
+        ) as ResolveResult.Found
+        val variant = found.media.single().variants.single()
+        assertEquals("https://cdn.example/720P_2000K/video.m3u8", variant.url)
+        assertEquals("https://cdn.example/720P_2000K/master.m3u8", variant.manifestUrl)
+        // After grouping, the quality still points at its master.
+        val organized = MediaGrouping.organize(found.media)
+        assertEquals("https://cdn.example/720P_2000K/master.m3u8", organized.single().variants.single().manifestUrl)
+    }
+}

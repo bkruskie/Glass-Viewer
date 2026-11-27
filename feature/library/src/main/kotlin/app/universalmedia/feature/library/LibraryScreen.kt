@@ -69,7 +69,8 @@ import app.universalmedia.core.database.MediaItemEntity
 import app.universalmedia.core.model.formatBytes
 import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.EmptyState
-import app.universalmedia.core.ui.components.GlowIcon
+import app.universalmedia.core.ui.components.MediaThumbnail
+import androidx.compose.foundation.layout.size
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -201,11 +202,7 @@ private fun MediaRow(
             .padding(start = 12.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlowIcon(
-            if (isAudio) Icons.Rounded.Audiotrack else Icons.Rounded.Movie,
-            size = 44,
-            tint = if (isAudio) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary,
-        )
+        MediaThumbnail(item.thumbnailPath, isAudio, Modifier.size(width = 96.dp, height = 54.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)

@@ -61,6 +61,8 @@ import app.universalmedia.core.model.DownloadStatus
 import app.universalmedia.core.model.formatBytes
 import app.universalmedia.core.ui.components.EmptyState
 import app.universalmedia.core.ui.components.GlowIcon
+import app.universalmedia.core.ui.components.MediaThumbnail
+import androidx.compose.foundation.layout.size
 import app.universalmedia.core.ui.components.Pill
 import app.universalmedia.media.download.MediaDownloadManager
 import kotlinx.coroutines.launch
@@ -155,15 +157,22 @@ private fun DownloadRow(
             .padding(start = 14.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlowIcon(
-            when (status) {
-                DownloadStatus.COMPLETED -> Icons.Rounded.DownloadDone
-                DownloadStatus.FAILED -> Icons.Rounded.ErrorOutline
-                else -> Icons.Rounded.Download
-            },
-            size = 40,
-            tint = statusColor,
-        )
+        if (status == DownloadStatus.COMPLETED) {
+            MediaThumbnail(
+                item.thumbnailPath,
+                isAudio = item.mimeType?.startsWith("audio") == true || item.audioOnly,
+                modifier = Modifier.size(width = 80.dp, height = 45.dp),
+            )
+        } else {
+            GlowIcon(
+                when (status) {
+                    DownloadStatus.FAILED -> Icons.Rounded.ErrorOutline
+                    else -> Icons.Rounded.Download
+                },
+                size = 40,
+                tint = statusColor,
+            )
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(item.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)

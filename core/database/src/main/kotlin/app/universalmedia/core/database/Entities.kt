@@ -52,6 +52,9 @@ data class DownloadEntity(
     /** Requested quality for manifests that list several (DASH). */
     val targetHeight: Int? = null,
     val targetBitrate: Long? = null,
+    // ---- v4 ----
+    /** Preview image (JPEG in app storage). */
+    val thumbnailPath: String? = null,
 )
 
 /** Anything in the user's library: downloads and imported local files. */
@@ -73,6 +76,9 @@ data class MediaItemEntity(
     val isFavorite: Boolean = false,
     val folder: String? = null,
     val downloadId: String? = null,
+    // ---- v4 ----
+    /** Preview image (JPEG in app storage): a frame of the video or the song's cover art. */
+    val thumbnailPath: String? = null,
 )
 
 @Entity(tableName = "playlists")

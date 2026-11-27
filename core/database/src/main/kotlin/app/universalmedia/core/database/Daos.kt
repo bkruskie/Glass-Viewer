@@ -75,6 +75,9 @@ interface DownloadDao {
     )
     suspend fun markCompleted(id: String, uri: String, fileName: String, mimeType: String, bytes: Long, updatedAt: Long)
 
+    @Query("UPDATE downloads SET thumbnailPath = :path WHERE id = :id")
+    suspend fun setThumbnail(id: String, path: String?)
+
     @Query("SELECT * FROM downloads WHERE status IN ('QUEUED', 'RUNNING')")
     suspend fun active(): List<DownloadEntity>
 
@@ -104,6 +107,12 @@ interface MediaItemDao {
     /** Ignores files that are already in the library (unique uri). */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(items: List<MediaItemEntity>): List<Long>
+
+    @Query("UPDATE media_items SET thumbnailPath = :path WHERE id = :id")
+    suspend fun setThumbnail(id: Long, path: String?)
+
+    @Query("SELECT * FROM media_items WHERE thumbnailPath IS NULL LIMIT :limit")
+    suspend fun withoutThumbnail(limit: Int): List<MediaItemEntity>
 
     @Query("UPDATE media_items SET isFavorite = :favorite WHERE id = :id")
     suspend fun setFavorite(id: Long, favorite: Boolean)

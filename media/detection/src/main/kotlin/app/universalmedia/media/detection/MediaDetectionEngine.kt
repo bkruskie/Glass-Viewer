@@ -180,7 +180,7 @@ class GenericMediaAdapter(
                 }
                 val withProt = media.withProtection(protection)
                 withProt.copy(
-                    variants = playlist.variants.withEstimatedSizes(durationMs),
+                    variants = playlist.variants.withEstimatedSizes(durationMs).map { it.copy(manifestUrl = body.finalUrl) },
                     durationMs = durationMs,
                     note = if (live) "Live stream" else withProt.note,
                 )
