@@ -26,7 +26,8 @@ class ReceiverDiscovery(context: Context) {
     private var resolving = false
 
     fun start() {
-        if (listener != null || nsd == null) return
+        val manager = nsd
+        if (listener != null || manager == null) return
         val l = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {}
             override fun onDiscoveryStopped(serviceType: String) {}
@@ -46,7 +47,7 @@ class ReceiverDiscovery(context: Context) {
             }
         }
         listener = l
-        runCatching { nsd.discoverServices(MirrorProtocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l) }
+        runCatching { manager.discoverServices(MirrorProtocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, l) }
             .onFailure { listener = null }
     }
 
