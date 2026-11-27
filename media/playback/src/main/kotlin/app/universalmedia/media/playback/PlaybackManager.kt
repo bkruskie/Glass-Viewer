@@ -17,6 +17,10 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import app.universalmedia.core.database.MediaItemDao
 import app.universalmedia.core.model.MediaFormat
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -59,6 +63,7 @@ class PlaybackManager(
     private val scope: CoroutineScope,
 ) {
     private var exo: ExoPlayer? = null
+    private var watchdog: Job? = null
     private val _current = MutableStateFlow<PlayRequest?>(null)
 
     /** The item loaded in the player, or null when nothing is. */
@@ -95,6 +100,7 @@ class PlaybackManager(
             playWhenReady = true
         }
         _current.value = request
+        startWatchdog()
         request.libraryItemId?.let { id ->
             scope.launch { mediaItemDao.updatePlayback(id, request.startPositionMs, System.currentTimeMillis()) }
         }
@@ -111,6 +117,49 @@ class PlaybackManager(
         scope.launch { mediaItemDao.updatePlayback(id, stored, System.currentTimeMillis()) }
     }
 
+    /**
+     * The player keeps time by the sound. If a file's sound can't be decoded, the clock
+     * never moves and the picture freezes. When playback is stuck for a few seconds,
+     * turn the sound off so the picture plays, and say so.
+     */
+    private fun startWatchdog() {
+        watchdog?.cancel()
+        val p = player
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .build()
+        watchdog = scope.launch(Dispatchers.Main) {
+            var lastPosition = -1L
+            var stuckSeconds = 0
+            var audioDisabled = false
+            while (isActive && exo === p) {
+                delay(1_000)
+                val wantsToPlay = p.playWhenReady &&
+                    p.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE &&
+                    (p.playbackState == Player.STATE_READY || p.playbackState == Player.STATE_BUFFERING)
+                val position = p.currentPosition
+                stuckSeconds = if (wantsToPlay && position == lastPosition) stuckSeconds + 1 else 0
+                lastPosition = position
+                if (stuckSeconds >= STUCK_SECONDS) {
+                    stuckSeconds = 0
+                    if (!audioDisabled && p.currentTracks.containsType(C.TRACK_TYPE_AUDIO)) {
+                        audioDisabled = true
+                        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                            .build()
+                        p.seekTo(position)
+                        _problem.value = "This file's sound couldn't be played, so it's playing without sound. " +
+                            "If it was downloaded before version 0.7.3, download it again."
+                    } else if (p.playbackState == Player.STATE_BUFFERING) {
+                        _problem.value = "Still loading… If this doesn't start, the source may be blocking playback here."
+                    } else {
+                        _problem.value = "Playback is stuck. Try Retry, or open it in another app."
+                    }
+                }
+            }
+        }
+    }
+
     /** Tries the current item again from where it stopped. */
     fun retry() {
         val request = _current.value ?: return
@@ -119,6 +168,7 @@ class PlaybackManager(
     }
 
     fun stop() {
+        watchdog?.cancel()
         _problem.value = null
         savePosition()
         exo?.stop()
@@ -146,7 +196,6 @@ class PlaybackManager(
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (!isPlaying) savePosition()
-                    if (isPlaying) _problem.value = null
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
@@ -164,4 +213,8 @@ class PlaybackManager(
                 }
             })
         }
+
+    private companion object {
+        const val STUCK_SECONDS = 4
+    }
 }
