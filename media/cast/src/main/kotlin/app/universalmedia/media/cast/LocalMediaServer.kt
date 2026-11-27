@@ -73,6 +73,34 @@ class LocalMediaServer(private val context: Context) {
         return "$base/m/$id/$name.$ext"
     }
 
+    private val playlists = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Wraps one MPEG-TS file in a one-segment HLS playlist. Players that only take
+     * .ts inside HLS (Roku) can then play a saved .ts download.
+     */
+    fun publishTsAsHls(mediaUrl: String, uri: Uri?): String? {
+        val base = start() ?: return null
+        val seconds = uri?.let { durationSeconds(it) } ?: 36_000L
+        val id = UUID.randomUUID().toString().replace("-", "")
+        playlists[id] = buildString {
+            append("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-MEDIA-SEQUENCE:0\n")
+            append("#EXT-X-TARGETDURATION:").append(seconds).append("\n")
+            append("#EXTINF:").append(seconds).append(".0,\n").append(mediaUrl).append("\n#EXT-X-ENDLIST\n")
+        }
+        return "$base/h/$id/index.m3u8"
+    }
+
+    private fun durationSeconds(uri: Uri): Long? = runCatching {
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(context, uri)
+            r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.let { (it + 999) / 1000 }
+        } finally {
+            r.release()
+        }
+    }.getOrNull()?.takeIf { it > 0 }
+
     private fun acceptLoop(socket: ServerSocket) {
         while (!socket.isClosed) {
             val client = try {
@@ -104,6 +132,9 @@ class LocalMediaServer(private val context: Context) {
                 val out = s.getOutputStream()
                 when {
                     path.startsWith("/m/") -> serveMedia(path, method, headers, out)
+                    path.startsWith("/h/") -> playlists[path.removePrefix("/h/").substringBefore('/')]
+                        ?.let { respond(out, 200, "application/vnd.apple.mpegurl", it.toByteArray()) }
+                        ?: respond(out, 404, "text/plain", "Not found".toByteArray())
                     path == "/tv" || path == "/tv/" -> respond(out, 200, "text/html; charset=utf-8", WebReceiverState.PAGE.toByteArray())
                     path == "/tv/state" -> respond(out, 200, "application/json", webReceiver.stateJson().toByteArray())
                     path == "/tv/status" && method == "POST" -> {

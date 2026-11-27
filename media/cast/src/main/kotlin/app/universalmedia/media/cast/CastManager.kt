@@ -141,7 +141,15 @@ class CastManager(context: Context, http: OkHttpClient, private val scope: Corou
                         val renderer = dlnaRenderers.value[device.id] ?: throw CastException("That TV is no longer available.")
                         dlna.load(renderer, url, item.title, mime)
                     }
-                    CastKind.ROKU -> dlna.rokuPlay(rokuHost(device), url, mime)
+                    CastKind.ROKU -> {
+                        // Roku plays MPEG-TS only inside HLS, so wrap saved .ts files in a playlist.
+                        val isTs = mime.contains("mp2t", true) || url.substringBefore('?').endsWith(".ts", true)
+                        val local = Uri.parse(item.uri).takeIf { it.scheme == "content" || it.scheme == "file" }
+                        val (playUrl, playMime) = if (isTs) {
+                            (server.publishTsAsHls(url, local) ?: throw CastException("Connect to Wi-Fi to play on a TV.")) to "application/x-mpegURL"
+                        } else url to mime
+                        dlna.rokuPlay(rokuHost(device), playUrl, playMime, item.title)
+                    }
                     CastKind.TV_BROWSER -> server.webReceiver.load(url, item.title)
                 }
                 _active.update { it?.copy(connecting = false, error = null) }

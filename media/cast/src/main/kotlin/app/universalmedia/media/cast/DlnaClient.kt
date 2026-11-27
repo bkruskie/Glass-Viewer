@@ -102,17 +102,43 @@ internal class DlnaClient(private val context: Context, private val http: OkHttp
         TvClassifier.classify(answers.values.toList(), identities)
     }
 
-    /** Roku External Control: asks the Roku to play [url] in its built-in player (experimental). */
-    suspend fun rokuPlay(host: String, url: String, mimeType: String) = withContext(Dispatchers.IO) {
+    /**
+     * Roku External Control: asks the Roku's built-in player to play [url] (experimental).
+     * Tries the ways different Roku OS versions accept it, and reports each answer if all fail.
+     */
+    suspend fun rokuPlay(host: String, url: String, mimeType: String, title: String) = withContext(Dispatchers.IO) {
+        val m = mimeType.lowercase()
         val format = when {
-            "mpegurl" in mimeType.lowercase() -> "hls"
-            "dash" in mimeType.lowercase() -> "dash"
-            "mp2t" in mimeType.lowercase() -> "ts"
-            "matroska" in mimeType.lowercase() -> "mkv"
+            "mpegurl" in m -> "hls"
+            "dash" in m -> "dash"
+            "matroska" in m -> "mkv"
+            "audio" in m -> "mp3"
             else -> "mp4"
         }
-        val target = "http://$host:8060/input/15985?t=v&u=" + java.net.URLEncoder.encode(url, "UTF-8") + "&k=(null)&videoFormat=$format"
-        rokuPost(target)
+        val query = "t=v&u=" + enc(url) + "&k=(null)&videoName=" + enc(title.take(60)) + "&videoFormat=$format"
+        val attempts = listOf("input/15985", "launch/15985", "input/15985-noformat")
+        val codes = mutableListOf<Int>()
+        for (a in attempts) {
+            val target = if (a.endsWith("-noformat")) "http://$host:8060/input/15985?t=v&u=${enc(url)}&k=(null)"
+            else "http://$host:8060/$a?$query"
+            val code = runCatching { rokuPostCode(target) }.getOrDefault(-1)
+            if (code in 200..299) return@withContext
+            if (code == 403) throw CastException(
+                "The Roku refused. On the Roku, open Settings › System › Advanced system settings › Control by mobile apps › Network access and set it to Default or Permissive.",
+            )
+            codes += code
+        }
+        throw CastException(
+            "This Roku didn't accept the video (answers: ${codes.joinToString()}). " +
+                "Some Roku models don't allow apps to send video. Use Screen mirroring (Smart View) to this Roku instead.",
+        )
+    }
+
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
+    private fun rokuPostCode(url: String): Int {
+        val request = Request.Builder().url(url).post(ByteArray(0).toRequestBody(null)).build()
+        return http.newCall(request).execute().use { it.code }
     }
 
     suspend fun rokuKey(host: String, key: String) = withContext(Dispatchers.IO) { rokuPost("http://$host:8060/keypress/$key") }
