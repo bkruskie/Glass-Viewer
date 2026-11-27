@@ -153,6 +153,95 @@ class LibraryViewModel(
 
     fun setFilter(value: LibraryFilter) { filter.value = value }
 
+    /** Facts about a file for the Details view: format, tracks, size, dates, where it is. */
+    suspend fun details(item: MediaItemEntity): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        val rows = mutableListOf<Pair<String, String>>()
+        val uri = Uri.parse(item.uri)
+        val date = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+        rows += "Name" to item.title
+        item.mimeType?.let { rows += "Type" to it }
+        item.sizeBytes?.let { rows += "Size" to android.text.format.Formatter.formatFileSize(app, it) }
+        runCatching {
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(app, uri)
+                r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.let { ms ->
+                    rows += "Length" to formatDuration(ms)
+                }
+                val w = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                val h = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                if (w != null && h != null) rows += "Resolution" to "$w × $h"
+                r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull()?.let { bps ->
+                    rows += "Bitrate" to "%.1f Mbps".format(bps / 1_000_000.0)
+                }
+            } finally {
+                r.release()
+            }
+        }
+        runCatching {
+            val ex = android.media.MediaExtractor()
+            try {
+                ex.setDataSource(app, uri, null)
+                for (i in 0 until ex.trackCount) {
+                    val f = ex.getTrackFormat(i)
+                    val mime = f.getString(android.media.MediaFormat.KEY_MIME) ?: continue
+                    val text = when {
+                        mime.startsWith("video") -> buildString {
+                            append(codecName(mime))
+                            if (f.containsKey(android.media.MediaFormat.KEY_FRAME_RATE)) {
+                                append(" · ").append(runCatching { f.getInteger(android.media.MediaFormat.KEY_FRAME_RATE) }.getOrNull() ?: "?").append(" fps")
+                            }
+                        }
+                        mime.startsWith("audio") -> buildString {
+                            append(codecName(mime))
+                            if (f.containsKey(android.media.MediaFormat.KEY_SAMPLE_RATE)) append(" · ").append(f.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE) / 1000.0).append(" kHz")
+                            if (f.containsKey(android.media.MediaFormat.KEY_CHANNEL_COUNT)) {
+                                val ch = f.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)
+                                append(" · ").append(if (ch == 1) "mono" else if (ch == 2) "stereo" else "$ch channels")
+                            }
+                            f.getString(android.media.MediaFormat.KEY_LANGUAGE)?.takeIf { it != "und" }?.let { append(" · ").append(it) }
+                        }
+                        else -> codecName(mime)
+                    }
+                    rows += (if (mime.startsWith("video")) "Video" else if (mime.startsWith("audio")) "Audio" else "Track") to text
+                }
+            } finally {
+                ex.release()
+            }
+        }
+        rows += "Added" to date.format(java.util.Date(item.addedAt))
+        item.lastPlayedAt?.let { rows += "Last played" to date.format(java.util.Date(it)) }
+        if (item.playbackPositionMs > 0) rows += "Stopped at" to formatDuration(item.playbackPositionMs)
+        val where = runCatching {
+            app.contentResolver.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.RELATIVE_PATH), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull()
+        rows += "Location" to (where?.trimEnd('/')?.replace("/", " › ") ?: uri.authority ?: uri.toString())
+        rows
+    }
+
+    private fun codecName(mime: String): String = when (mime) {
+        "video/avc" -> "H.264"
+        "video/hevc" -> "H.265 (HEVC)"
+        "video/x-vnd.on2.vp9" -> "VP9"
+        "video/x-vnd.on2.vp8" -> "VP8"
+        "video/av01" -> "AV1"
+        "video/mp4v-es" -> "MPEG-4"
+        "audio/mp4a-latm" -> "AAC"
+        "audio/mpeg" -> "MP3"
+        "audio/opus" -> "Opus"
+        "audio/vorbis" -> "Vorbis"
+        "audio/ac3" -> "Dolby Digital"
+        "audio/eac3" -> "Dolby Digital Plus"
+        "audio/flac" -> "FLAC"
+        else -> mime
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val s = ms / 1000
+        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+    }
+
     fun setSort(value: LibrarySort) { sort.value = value }
 
     fun consumeMessage() { _message.value = null }

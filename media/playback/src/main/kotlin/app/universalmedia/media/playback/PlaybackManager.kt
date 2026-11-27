@@ -32,6 +32,17 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 
 /** What to play. Web sources carry the page as Referer so sites serve them like in the browser. */
+data class SubtitleFile(val uri: String, val mimeType: String, val label: String)
+
+/** Media3 MIME type for a subtitle file name, or null when it isn't one. */
+fun subtitleMime(fileName: String): String? = when (fileName.substringAfterLast('.', "").lowercase()) {
+    "srt" -> MimeTypes.APPLICATION_SUBRIP
+    "vtt", "webvtt" -> MimeTypes.TEXT_VTT
+    "ass", "ssa" -> MimeTypes.TEXT_SSA
+    "ttml", "dfxp", "xml" -> MimeTypes.APPLICATION_TTML
+    else -> null
+}
+
 data class PlayRequest(
     val uri: String,
     val title: String,
@@ -39,6 +50,8 @@ data class PlayRequest(
     val referer: String? = null,
     val libraryItemId: Long? = null,
     val startPositionMs: Long = 0,
+    /** Subtitle files added by the user (shown on top of any built into the video). */
+    val subtitles: List<SubtitleFile> = emptyList(),
 ) {
     companion object {
         /** Media3 MIME hint for stream manifests; null lets the player sniff files. */
@@ -174,6 +187,17 @@ class PlaybackManager(
             .setUri(Uri.parse(request.uri))
             .setMimeType(request.mimeType)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(request.title).build())
+            .setSubtitleConfigurations(
+                request.subtitles.mapIndexed { i, sub ->
+                    MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.uri))
+                        .setMimeType(sub.mimeType)
+                        .setLabel(sub.label)
+                        .setId("user-$i")
+                        // The newest file the user picked is shown straight away.
+                        .setSelectionFlags(if (i == request.subtitles.lastIndex) androidx.media3.common.C.SELECTION_FLAG_DEFAULT else 0)
+                        .build()
+                },
+            )
             .build()
         val source = DefaultMediaSourceFactory(DefaultDataSource.Factory(context, http)).createMediaSource(item)
         _speed.value = 1f
@@ -189,6 +213,25 @@ class PlaybackManager(
         request.libraryItemId?.let { id ->
             scope.launch { mediaItemDao.updatePlayback(id, request.startPositionMs, System.currentTimeMillis()) }
         }
+    }
+
+    /**
+     * Adds a subtitle file (.srt, .vtt, .ass/.ssa, .ttml) to what's playing and keeps the position.
+     * Returns false when the file type isn't a subtitle format.
+     */
+    fun addSubtitle(uri: String, fileName: String): Boolean {
+        val request = _current.value ?: return false
+        val mime = subtitleMime(fileName) ?: return false
+        val wasPlaying = player.playWhenReady
+        val position = player.currentPosition
+        val updated = request.copy(
+            startPositionMs = position,
+            subtitles = request.subtitles + SubtitleFile(uri, mime, fileName.substringBeforeLast('.')),
+        )
+        _queue.value?.let { q -> _queue.value = q.copy(items = q.items.toMutableList().also { it[q.index] = updated }) }
+        load(updated)
+        player.playWhenReady = wasPlaying
+        return true
     }
 
     /** Remembers where the user is in a library item (restarts from 0 when nearly finished). */

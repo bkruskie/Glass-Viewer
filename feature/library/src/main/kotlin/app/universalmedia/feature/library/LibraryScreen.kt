@@ -13,6 +13,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -104,6 +105,7 @@ fun LibraryScreen(
     var showPlaylists by rememberSaveable { mutableStateOf(false) }
     var openPlaylist by remember { mutableStateOf<app.universalmedia.core.database.PlaylistSummary?>(null) }
     var addingToPlaylist by remember { mutableStateOf<MediaItemEntity?>(null) }
+    var detailsFor by remember { mutableStateOf<MediaItemEntity?>(null) }
     var newPlaylist by remember { mutableStateOf(false) }
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     var deleting by remember { mutableStateOf<MediaItemEntity?>(null) }
@@ -222,6 +224,7 @@ fun LibraryScreen(
                             onShare = { shareFile(context, item) },
                             onDelete = { deleting = item },
                             onAddToPlaylist = { addingToPlaylist = item },
+                            onDetails = { detailsFor = item },
                         )
                     }
                 }
@@ -231,6 +234,7 @@ fun LibraryScreen(
 
     renaming?.let { item -> RenameDialog(item, onRename = { viewModel.rename(item, it) }, onDismiss = { renaming = null }) }
     deleting?.let { item -> DeleteDialog(item, onDelete = { viewModel.deleteFile(item) }, onDismiss = { deleting = null }) }
+    detailsFor?.let { item -> DetailsDialog(item, viewModel, onDismiss = { detailsFor = null }) }
     addingToPlaylist?.let { item -> AddToPlaylistSheet(item, viewModel, onDismiss = { addingToPlaylist = null }) }
     openPlaylist?.let { p ->
         PlaylistSheet(
@@ -317,6 +321,7 @@ private fun MediaRow(
     onShare: () -> Unit,
     onDelete: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    onDetails: () -> Unit,
 ) {
     val isAudio = item.mimeType?.startsWith("audio") == true
     var menu by remember { mutableStateOf(false) }
@@ -354,6 +359,7 @@ private fun MediaRow(
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Add to playlist…") }, onClick = { menu = false; onAddToPlaylist() })
                 DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                DropdownMenuItem(text = { Text("Details") }, onClick = { menu = false; onDetails() })
                 DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; onShare() })
                 DropdownMenuItem(text = { Text("Open with…") }, onClick = { menu = false; onOpen() })
                 DropdownMenuItem(text = { Text("Remove from library") }, onClick = { menu = false; onRemove() })
@@ -376,4 +382,34 @@ private fun openExternally(context: Context, item: MediaItemEntity) {
     } catch (e: ActivityNotFoundException) {
         Toast.makeText(context, "No app can open this file", Toast.LENGTH_SHORT).show()
     }
+}
+
+@Composable
+private fun DetailsDialog(item: MediaItemEntity, viewModel: LibraryViewModel, onDismiss: () -> Unit) {
+    val rows by androidx.compose.runtime.produceState<List<Pair<String, String>>?>(null, item.id) { value = viewModel.details(item) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Details") },
+        text = {
+            val list = rows
+            if (list == null) {
+                androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
+            } else {
+                Column(
+                    Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    list.forEach { (label, value) ->
+                        Column {
+                            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            androidx.compose.foundation.text.selection.SelectionContainer {
+                                Text(value, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }

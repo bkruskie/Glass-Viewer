@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import android.view.TextureView
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.rounded.FitScreen
 import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -93,12 +95,27 @@ internal fun VideoToolbar(
     var loop by remember { mutableStateOf(playback.player.repeatMode == Player.REPEAT_MODE_ONE) }
     val white = Color.White
     val accent = MaterialTheme.colorScheme.secondary
+    val subtitlePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: uri.lastPathSegment.orEmpty()
+        val ok = playback.addSubtitle(uri.toString(), name)
+        Toast.makeText(
+            context,
+            if (ok) "Subtitles added. Change them with the CC button." else "That isn't a subtitle file (.srt, .vtt, .ass, .ttml).",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
 
     Row(
         modifier
             .padding(8.dp)
             .clip(RoundedCornerShape(50))
             .background(Color.Black.copy(alpha = 0.55f))
+            .horizontalScroll(androidx.compose.foundation.rememberScrollState())
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -151,6 +168,9 @@ internal fun VideoToolbar(
                 contentDescription = "Fit, fill or stretch",
                 tint = white,
             )
+        }
+        IconButton(onClick = { subtitlePicker.launch(arrayOf("*/*")) }) {
+            Icon(Icons.Rounded.Subtitles, contentDescription = "Add subtitle file", tint = white)
         }
         IconButton(onClick = {
             loop = !loop
