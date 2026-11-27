@@ -25,7 +25,7 @@ object UmColors {
     val SurfaceLow = Color(0xFF141821)
     val Surface1 = Color(0xFF181D27)
     val Surface2 = Color(0xFF1E2430)
-    val Surface3 = Color(0xFF252C3A)
+    val Surface3 = Color(0xFF2C3446)
 }
 
 private fun scheme(pureBlack: Boolean) = darkColorScheme(
@@ -50,8 +50,8 @@ private fun scheme(pureBlack: Boolean) = darkColorScheme(
     surfaceContainerLow = if (pureBlack) Color(0xFF0B0C10) else UmColors.SurfaceLow,
     surfaceContainer = if (pureBlack) Color(0xFF111318) else UmColors.Surface1,
     surfaceContainerHigh = if (pureBlack) Color(0xFF171A21) else UmColors.Surface2,
-    surfaceContainerHighest = if (pureBlack) Color(0xFF1E222B) else UmColors.Surface3,
-    outline = Color(0xFF4A5366),
+    surfaceContainerHighest = if (pureBlack) Color(0xFF262B36) else UmColors.Surface3,
+    outline = Color(0xFF5A6479),
     outlineVariant = Color(0xFF2B3240),
 )
 

@@ -149,9 +149,13 @@ fun BrowserScreen(
         viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
     }
 
-    Column(modifier.fillMaxSize().statusBarsPadding()) {
+    Column(modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .statusBarsPadding()
+                .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AddressBar(
@@ -274,8 +278,16 @@ private fun AddressBar(
         onValueChange = { value = it },
         singleLine = true,
         textStyle = MaterialTheme.typography.bodyMedium,
-        placeholder = { Text("Search or enter address", style = MaterialTheme.typography.bodyMedium) },
-        leadingIcon = { Icon(leading, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        placeholder = {
+            Text(
+                "Search or enter address",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        leadingIcon = {
+            Icon(leading, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        },
         trailingIcon = {
             when {
                 focused && value.text.isNotEmpty() -> IconButton(onClick = { value = TextFieldValue("") }) {
@@ -305,9 +317,18 @@ private fun AddressBar(
             unfocusedIndicatorColor = Color.Transparent,
             disabledIndicatorColor = Color.Transparent,
             focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            cursorColor = MaterialTheme.colorScheme.primary,
         ),
-        modifier = modifier.onFocusChanged { s ->
+        modifier = modifier
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                shape = RoundedCornerShape(50),
+            )
+            .onFocusChanged { s ->
             if (s.isFocused && !focused) value = TextFieldValue(url, TextRange(0, url.length))
             focused = s.isFocused
         },
