@@ -87,7 +87,7 @@ fun UniversalMediaRoot(
 
     LaunchedEffect(incomingUrl) {
         if (incomingUrl != null) {
-            browserViewModel.open(incomingUrl, inNewTab = true)
+            browserViewModel.openShared(incomingUrl)
             navController.navigateTopLevel(TopDestination.BROWSER.route)
             onIncomingConsumed()
         }

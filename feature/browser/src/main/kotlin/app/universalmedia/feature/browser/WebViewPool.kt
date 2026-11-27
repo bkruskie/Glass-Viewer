@@ -16,7 +16,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 import app.universalmedia.core.model.AppSettings
 import org.json.JSONArray
 import org.json.JSONTokener
@@ -119,6 +121,7 @@ class WebViewPool(private val context: Context) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
             WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
         }
+        installLiveProbe(this, tabId, events)
 
         webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -129,7 +132,7 @@ class WebViewPool(private val context: Context) {
                 if (view == null || url == null) return
                 events.onPageFinished(tabId, url, view.title.orEmpty())
                 events.onNavigationState(tabId, view.canGoBack(), view.canGoForward())
-                if (view.settings.javaScriptEnabled) {
+                if (view.settings.javaScriptEnabled && !liveProbeSupported) {
                     view.evaluateJavascript(MEDIA_PROBE_JS) { events.onPageMedia(tabId, parseProbeResult(it)) }
                 }
             }
@@ -173,7 +176,113 @@ class WebViewPool(private val context: Context) {
         }
     }
 
+    /**
+     * Installs a script that runs before page scripts in every frame. It reports
+     * media element sources (including players added later), and manifest
+     * responses fetched by JavaScript players whose URLs have no telling
+     * extension. Messages are treated as untrusted hints: each URL still goes
+     * through the classifier and engine like any other request.
+     */
+    private fun installLiveProbe(webView: WebView, tabId: String, events: BrowserEvents) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) ||
+            !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        ) {
+            return
+        }
+        WebViewCompat.addWebMessageListener(webView, PROBE_OBJECT, setOf("*")) { _, message, _, _, _ ->
+            val data = message.data ?: return@addWebMessageListener
+            if (data.length > 4096) return@addWebMessageListener
+            runCatching {
+                val json = JSONObject(data)
+                val url = json.optString("u")
+                val mime = json.optString("t").takeIf { it.isNotBlank() && it != "null" }
+                if (url.startsWith("http")) events.onResourceRequest(tabId, url, mime)
+            }
+        }
+        WebViewCompat.addDocumentStartJavaScript(webView, LIVE_PROBE_JS, setOf("*"))
+    }
+
+    private val liveProbeSupported: Boolean by lazy {
+        WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
+            WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+    }
+
     companion object {
+        private const val PROBE_OBJECT = "UniversalMediaProbe"
+
+        private const val LIVE_PROBE_JS = """
+            (function() {
+              if (window.__umProbe) return;
+              window.__umProbe = true;
+              var P = window.UniversalMediaProbe;
+              if (!P) return;
+              var sent = {}, count = 0;
+              function abs(u) { try { return new URL(u, document.baseURI).href; } catch (e) { return null; } }
+              function send(u, t) {
+                try {
+                  if (!u || typeof u !== 'string' || count > 200) return;
+                  if (u.indexOf('blob:') === 0 || u.indexOf('data:') === 0) return;
+                  u = abs(u); if (!u) return;
+                  var k = u + '|' + (t || '');
+                  if (sent[k]) return;
+                  sent[k] = 1; count++;
+                  P.postMessage(JSON.stringify({ u: u, t: t || null }));
+                } catch (e) {}
+              }
+              function isManifest(t) { return !!t && /mpegurl|dash\+xml/i.test(t); }
+              function scan() {
+                try {
+                  var els = document.querySelectorAll('video, audio, video source, audio source');
+                  for (var i = 0; i < els.length; i++) send(els[i].currentSrc || els[i].src, null);
+                } catch (e) {}
+              }
+              ['play', 'loadedmetadata'].forEach(function(name) {
+                document.addEventListener(name, function(e) {
+                  var el = e.target;
+                  if (el && (el.currentSrc || el.src)) send(el.currentSrc || el.src, null);
+                }, true);
+              });
+              try {
+                if (window.fetch) {
+                  var origFetch = window.fetch;
+                  window.fetch = function() {
+                    var p = origFetch.apply(this, arguments);
+                    try {
+                      p.then(function(r) {
+                        try { var t = r.headers.get('content-type'); if (isManifest(t)) send(r.url, t.split(';')[0]); } catch (e) {}
+                      }, function() {});
+                    } catch (e) {}
+                    return p;
+                  };
+                }
+                var origOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                  try {
+                    var xhr = this;
+                    xhr.addEventListener('load', function() {
+                      try {
+                        var t = xhr.getResponseHeader('content-type');
+                        if (isManifest(t)) send(xhr.responseURL || String(url), t.split(';')[0]);
+                      } catch (e) {}
+                    });
+                  } catch (e) {}
+                  return origOpen.apply(this, arguments);
+                };
+              } catch (e) {}
+              var timer = null;
+              function schedule() { if (timer) return; timer = setTimeout(function() { timer = null; scan(); }, 600); }
+              function observe() {
+                try {
+                  new MutationObserver(schedule).observe(document.documentElement, {
+                    childList: true, subtree: true, attributes: true, attributeFilter: ['src']
+                  });
+                  scan();
+                } catch (e) {}
+              }
+              if (document.documentElement) observe(); else document.addEventListener('DOMContentLoaded', observe);
+            })();
+        """
+
         /** Collects the sources of <video>/<audio> elements; returns a JSON array string. */
         private const val MEDIA_PROBE_JS = """
             (function() {

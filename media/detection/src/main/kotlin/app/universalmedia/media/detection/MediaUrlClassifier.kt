@@ -23,14 +23,17 @@ object MediaUrlClassifier {
     fun classify(url: String, mimeType: String? = null): Result {
         if (!UrlUtils.isHttp(url.trim())) return Result.NotMedia
 
+        val ext = UrlUtils.extensionOf(url)
+        // Segment extensions win over MIME: DASH/HLS fragments are often served as video/mp4.
+        if (ext != null && ext in segmentExtensions) return Result.Segment
+
         if (!mimeType.isNullOrBlank()) {
             val mime = mimeType.substringBefore(';').trim().lowercase()
             if (mime in segmentMimeTypes) return Result.Segment
             MediaFormat.fromMimeType(mime)?.let { return Result.Media(it) }
         }
 
-        val ext = UrlUtils.extensionOf(url) ?: return Result.NotMedia
-        if (ext in segmentExtensions) return Result.Segment
+        if (ext == null) return Result.NotMedia
         return MediaFormat.fromExtension(ext)?.let { Result.Media(it) } ?: Result.NotMedia
     }
 

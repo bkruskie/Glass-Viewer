@@ -4,6 +4,7 @@ import app.universalmedia.core.model.Availability
 import app.universalmedia.core.model.DetectedMedia
 import app.universalmedia.core.model.DetectionOrigin
 import app.universalmedia.core.model.MediaFormat
+import app.universalmedia.core.model.MediaVariant
 import app.universalmedia.core.model.Protection
 
 /** Input to the engine: something that might be, or might point to, media. */
@@ -13,9 +14,12 @@ data class ResolveRequest(
     val pageUrl: String? = null,
     val pageTitle: String? = null,
     val mimeType: String? = null,
-    /** Headers the page itself would send (cookies, referer) for authorized access. */
+    /** Extra headers for the origin server. Referer is added automatically from [pageUrl]. */
     val headers: Map<String, String> = emptyMap(),
-)
+) {
+    val effectiveHeaders: Map<String, String>
+        get() = if (pageUrl != null && "Referer" !in headers) headers + ("Referer" to pageUrl) else headers
+}
 
 sealed interface ResolveResult {
     data class Found(val media: List<DetectedMedia>) : ResolveResult
@@ -24,9 +28,9 @@ sealed interface ResolveResult {
 }
 
 /**
- * A replaceable integration for one website or family of players.
- * Adapters are registered at start-up; adding one never requires touching the
- * browser, download manager or UI.
+ * A replaceable integration for one website or family of sites.
+ * Adapters are registered at start-up; adding one never touches the browser,
+ * download manager or UI.
  */
 interface SiteAdapter {
     val id: String
@@ -35,10 +39,23 @@ interface SiteAdapter {
     suspend fun resolve(request: ResolveRequest): ResolveResult
 }
 
-/** Network seam. Implemented with OkHttp in the app (Milestone 2); faked in tests. */
-fun interface ManifestFetcher {
-    /** Returns the body as text, or null if unreachable. Must respect [headers]. */
-    suspend fun fetchText(url: String, headers: Map<String, String>): String?
+/** Result of fetching a small text resource (manifest or API response). */
+sealed interface FetchResult {
+    /** [finalUrl] is the URL after redirects; relative manifest entries resolve against it. */
+    data class Success(val body: String, val contentType: String?, val finalUrl: String) : FetchResult
+    data class HttpError(val code: Int) : FetchResult
+    data class Failure(val reason: String) : FetchResult
+}
+
+/** Headers-only probe of a direct file. */
+data class ProbeResult(val code: Int, val contentLength: Long?, val contentType: String?)
+
+/** Network seam. OkHttp implementation lives in :core:network; tests use fakes. */
+interface ManifestFetcher {
+    suspend fun fetch(url: String, headers: Map<String, String>): FetchResult
+
+    /** HEAD request. Returns null when the server doesn't support it or on network error. */
+    suspend fun probe(url: String, headers: Map<String, String>): ProbeResult? = null
 }
 
 /** Decides what the user may do with a source, based only on its technical protection. */
@@ -57,11 +74,29 @@ object AvailabilityPolicy {
             "Protected by ${protection.systems.joinToString { it.displayName }}. It can be watched on the " +
                 "site, but it can't be saved. Use the service's own offline or download option."
     }
+
+    fun forHttpStatus(code: Int): Availability =
+        if (code == 401 || code == 403) Availability.AUTH_REQUIRED else Availability.INACCESSIBLE
+
+    fun explainHttpStatus(code: Int): String = when (code) {
+        401, 403 -> "The site requires you to be signed in. Sign in on the site in this browser, then try again."
+        404, 410 -> "The source no longer exists (HTTP $code)."
+        else -> "The server refused the request (HTTP $code)."
+    }
+}
+
+/** Fills [MediaVariant.estimatedBytes] from bitrate × duration where the size isn't known. */
+fun List<MediaVariant>.withEstimatedSizes(durationMs: Long?): List<MediaVariant> {
+    if (durationMs == null || durationMs <= 0) return this
+    return map { v ->
+        if (v.estimatedBytes != null || v.bitrate == null) v else v.copy(estimatedBytes = v.bitrate!! * durationMs / 8_000)
+    }
 }
 
 /**
- * Fallback adapter: handles direct files and, when a fetcher is available,
- * inspects HLS / DASH manifests for qualities and protection.
+ * Fallback adapter: handles direct files and stream manifests. With a fetcher it
+ * reads HLS/DASH qualities, duration, protection and sizes; without one it only
+ * classifies.
  */
 class GenericMediaAdapter(
     private val fetcher: ManifestFetcher? = null,
@@ -92,31 +127,81 @@ class GenericMediaAdapter(
         val enriched = when (format) {
             MediaFormat.HLS -> enrichHls(base, request)
             MediaFormat.DASH -> enrichDash(base, request)
-            else -> base
+            else -> enrichDirect(base, request)
         }
         return ResolveResult.Found(listOf(enriched))
     }
 
-    private suspend fun enrichHls(media: DetectedMedia, request: ResolveRequest): DetectedMedia {
-        val body = fetcher?.fetchText(request.url, request.headers) ?: return media
-        return when (val playlist = HlsPlaylistParser.parse(body, request.url)) {
-            null -> media.copy(availability = Availability.UNSUPPORTED, note = "Unrecognised playlist")
-            is HlsPlaylist.Master -> media.withProtection(playlist.protection).copy(variants = playlist.variants)
-            is HlsPlaylist.Media -> media.withProtection(playlist.protection).copy(
-                durationMs = if (playlist.isLive) null else (playlist.totalDurationSeconds * 1000).toLong(),
-                note = if (playlist.isLive) "Live stream" else media.note,
+    private suspend fun enrichDirect(media: DetectedMedia, request: ResolveRequest): DetectedMedia {
+        val probe = fetcher?.probe(request.url, request.effectiveHeaders) ?: return media
+        if (probe.code >= 400 && probe.code != 405) {
+            return media.copy(
+                availability = AvailabilityPolicy.forHttpStatus(probe.code),
+                note = AvailabilityPolicy.explainHttpStatus(probe.code),
             )
+        }
+        val variant = MediaVariant(url = request.url, format = media.format, estimatedBytes = probe.contentLength)
+        return media.copy(variants = listOf(variant), mimeType = media.mimeType ?: probe.contentType)
+    }
+
+    private suspend fun enrichHls(media: DetectedMedia, request: ResolveRequest): DetectedMedia {
+        val fetcher = fetcher ?: return media
+        val headers = request.effectiveHeaders
+        val body = when (val r = fetcher.fetch(request.url, headers)) {
+            is FetchResult.Success -> r
+            is FetchResult.HttpError -> return media.unavailable(r.code)
+            is FetchResult.Failure -> return media.copy(availability = Availability.INACCESSIBLE, note = r.reason)
+        }
+        return when (val playlist = HlsPlaylistParser.parse(body.body, body.finalUrl)) {
+            null -> media.copy(availability = Availability.UNSUPPORTED, note = "Unrecognised playlist")
+            is HlsPlaylist.Media -> {
+                val withProt = media.withProtection(playlist.protection)
+                withProt.copy(
+                    durationMs = if (playlist.isLive) null else (playlist.totalDurationSeconds * 1000).toLong(),
+                    note = if (playlist.isLive) "Live stream" else withProt.note,
+                )
+            }
+            is HlsPlaylist.Master -> {
+                // The duration lives in the media playlists; read the best one (one extra request).
+                var protection = playlist.protection
+                var durationMs: Long? = null
+                var live = false
+                val best = playlist.variants.firstOrNull { !it.audioOnly } ?: playlist.variants.firstOrNull()
+                if (best != null) {
+                    val sub = fetcher.fetch(best.url, headers)
+                    if (sub is FetchResult.Success) {
+                        val child = HlsPlaylistParser.parse(sub.body, sub.finalUrl)
+                        if (child is HlsPlaylist.Media) {
+                            live = child.isLive
+                            if (!live) durationMs = (child.totalDurationSeconds * 1000).toLong()
+                            protection = DrmSystems.merge(listOf(protection, child.protection))
+                        }
+                    }
+                }
+                val withProt = media.withProtection(protection)
+                withProt.copy(
+                    variants = playlist.variants.withEstimatedSizes(durationMs),
+                    durationMs = durationMs,
+                    note = if (live) "Live stream" else withProt.note,
+                )
+            }
         }
     }
 
     private suspend fun enrichDash(media: DetectedMedia, request: ResolveRequest): DetectedMedia {
-        val body = fetcher?.fetchText(request.url, request.headers) ?: return media
-        val summary = DashManifestInspector.inspect(body, request.url)
+        val fetcher = fetcher ?: return media
+        val body = when (val r = fetcher.fetch(request.url, request.effectiveHeaders)) {
+            is FetchResult.Success -> r
+            is FetchResult.HttpError -> return media.unavailable(r.code)
+            is FetchResult.Failure -> return media.copy(availability = Availability.INACCESSIBLE, note = r.reason)
+        }
+        val summary = DashManifestInspector.inspect(body.body, body.finalUrl)
             ?: return media.copy(availability = Availability.UNSUPPORTED, note = "Unrecognised manifest")
-        return media.withProtection(summary.protection).copy(
-            variants = summary.variants,
+        val withProt = media.withProtection(summary.protection)
+        return withProt.copy(
+            variants = summary.variants.withEstimatedSizes(summary.durationMs),
             durationMs = summary.durationMs,
-            note = if (summary.isLive) "Live stream" else media.note,
+            note = if (summary.isLive) "Live stream" else withProt.note,
         )
     }
 
@@ -126,12 +211,17 @@ class GenericMediaAdapter(
         note = AvailabilityPolicy.explain(p) ?: note,
     )
 
+    private fun DetectedMedia.unavailable(code: Int) = copy(
+        availability = AvailabilityPolicy.forHttpStatus(code),
+        note = AvailabilityPolicy.explainHttpStatus(code),
+    )
+
     companion object {
         fun idFor(url: String): String = "m" + url.hashCode().toUInt().toString(16) + url.length.toString(16)
     }
 }
 
-/** Routes a request to the first matching site adapter, else the generic one. */
+/** Routes requests to site adapters, falling back to [GenericMediaAdapter] for media URLs. */
 class MediaDetectionEngine(
     adapters: List<SiteAdapter> = emptyList(),
     private val fallback: SiteAdapter = GenericMediaAdapter(),
@@ -140,17 +230,32 @@ class MediaDetectionEngine(
 
     val registeredAdapters: List<SiteAdapter> get() = adapters + fallback
 
+    /** For URLs that already look like media (requests, element sources, shared file links). */
     suspend fun resolve(request: ResolveRequest): ResolveResult {
         val adapter = adapters.firstOrNull { it.matches(request.url) } ?: fallback
-        return try {
-            adapter.resolve(request)
-        } catch (e: Exception) {
-            if (e is kotlin.coroutines.cancellation.CancellationException) throw e
-            ResolveResult.Unavailable(Availability.INACCESSIBLE, e.message ?: "Could not analyse this source")
-        }
+        return safely { adapter.resolve(request) }
+    }
+
+    /**
+     * For web pages (navigation, shared page links). Only dedicated site adapters
+     * handle pages; returns [ResolveResult.NotMedia] when none matches.
+     */
+    suspend fun resolvePage(request: ResolveRequest): ResolveResult {
+        val adapter = adapters.firstOrNull { it.matches(request.url) } ?: return ResolveResult.NotMedia
+        return safely { adapter.resolve(request) }
     }
 
     /** Synchronous pre-filter, safe to call on the WebView network thread. */
     fun isCandidate(url: String, mimeType: String? = null): Boolean =
         MediaUrlClassifier.isActionable(MediaUrlClassifier.classify(url, mimeType))
+
+    /** True when a dedicated adapter claims this page URL. Cheap. */
+    fun hasPageAdapter(url: String): Boolean = adapters.any { it.matches(url) }
+
+    private inline fun safely(block: () -> ResolveResult): ResolveResult = try {
+        block()
+    } catch (e: Exception) {
+        if (e is kotlin.coroutines.cancellation.CancellationException) throw e
+        ResolveResult.Unavailable(Availability.INACCESSIBLE, e.message ?: "Could not analyse this source")
+    }
 }

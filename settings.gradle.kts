@@ -29,6 +29,7 @@ include(":core:model")
 include(":core:ui")
 include(":core:database")
 include(":core:datastore")
+include(":core:network")
 
 // Media engines (pure Kotlin where possible, for future iOS / desktop reuse)
 include(":media:detection")

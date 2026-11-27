@@ -1,6 +1,9 @@
 package app.universalmedia.feature.browser
 
 import android.app.Activity
+import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.widget.Toast
 import android.content.Context
 import android.content.ContextWrapper
 import android.graphics.Color as AndroidColor
@@ -38,6 +41,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
@@ -89,6 +93,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.universalmedia.core.database.BookmarkEntity
 import app.universalmedia.core.ui.components.FeatureCard
@@ -134,6 +139,11 @@ fun BrowserScreen(
     }
 
     BackHandler(enabled = tab.canGoBack && !tab.isStartPage) { webView.goBack() }
+
+    val context = LocalContext.current
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
 
     Column(modifier.fillMaxSize().statusBarsPadding()) {
         Row(
@@ -186,6 +196,7 @@ fun BrowserScreen(
                 StartPage(
                     bookmarks = state.bookmarks,
                     onOpen = { viewModel.open(it) },
+                    onOpenCopied = viewModel::openShared,
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                 )
             }
@@ -376,7 +387,24 @@ private fun MenuItem(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StartPage(bookmarks: List<BookmarkEntity>, onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun StartPage(
+    bookmarks: List<BookmarkEntity>,
+    onOpen: (String) -> Unit,
+    onOpenCopied: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val clipboard = remember { context.getSystemService(ClipboardManager::class.java) }
+    var hasCopiedText by remember { mutableStateOf(false) }
+    // Only the clip's description is checked here, which doesn't read its contents.
+    // The text itself is read only when the user taps the chip.
+    LifecycleResumeEffect(clipboard) {
+        hasCopiedText = clipboard?.primaryClipDescription?.let {
+            it.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) || it.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST)
+        } == true
+        onPauseOrDispose { }
+    }
+
     Column(
         modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -390,6 +418,21 @@ private fun StartPage(bookmarks: List<BookmarkEntity>, onOpen: (String) -> Unit,
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        if (hasCopiedText) {
+            Spacer(Modifier.height(16.dp))
+            AssistChip(
+                onClick = {
+                    val text = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }
+                        ?.getItemAt(0)?.coerceToText(context)?.toString()
+                    val url = SharedTextParser.firstUrl(text)
+                    if (url != null) onOpenCopied(url)
+                    else Toast.makeText(context, "No link found in what you copied", Toast.LENGTH_SHORT).show()
+                },
+                label = { Text("Open copied link") },
+                leadingIcon = { Icon(Icons.Rounded.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp)) },
+            )
+        }
 
         if (bookmarks.isNotEmpty()) {
             SectionHeader("Bookmarks", Modifier.fillMaxWidth())

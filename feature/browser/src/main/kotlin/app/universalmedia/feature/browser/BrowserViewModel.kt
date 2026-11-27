@@ -20,7 +20,10 @@ import app.universalmedia.media.detection.UrlUtils
 import java.util.UUID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -43,6 +46,8 @@ data class BrowserTab(
     val detected: List<DetectedMedia> = emptyList(),
     /** URL the WebView should load next; consumed by the UI. */
     val pendingLoad: String? = null,
+    /** Last page URL handed to site adapters, to avoid resolving the same page twice. */
+    val resolvedPageUrl: String? = null,
 ) {
     val isStartPage: Boolean get() = url.isBlank() && pendingLoad == null
     val displayTitle: String get() = title.ifBlank { UrlUtils.hostOf(url) ?: "New tab" }
@@ -77,6 +82,11 @@ class BrowserViewModel(
     }
 
     private val session = MutableStateFlow(newTab().let { Session(listOf(it), it.id) })
+
+    private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 4)
+
+    /** One-off user-facing notices (e.g. "Sign-in required"), shown as toasts. */
+    val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private val settings: StateFlow<AppSettings> =
         settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
@@ -116,6 +126,28 @@ class BrowserViewModel(
             session.update { it.copy(tabs = it.tabs + tab, activeTabId = tab.id) }
         } else {
             load(session.value.activeTabId, url)
+        }
+    }
+
+    /**
+     * A link shared from another app: open it in a new tab and analyse it right
+     * away, so a direct file or a supported page shows its media immediately.
+     */
+    fun openShared(url: String) {
+        val tab = newTab(pendingLoad = url).copy(resolvedPageUrl = url)
+        session.update { it.copy(tabs = it.tabs + tab, activeTabId = tab.id) }
+        viewModelScope.launch {
+            val request = ResolveRequest(url = url, origin = DetectionOrigin.SHARE_INTENT)
+            val result = when {
+                detectionEngine.hasPageAdapter(url) -> detectionEngine.resolvePage(request)
+                detectionEngine.isCandidate(url) -> detectionEngine.resolve(request)
+                else -> ResolveResult.NotMedia // an ordinary page: in-page detection takes over as it loads
+            }
+            when (result) {
+                is ResolveResult.Found -> addDetected(tab.id, result.media)
+                is ResolveResult.Unavailable -> _messages.tryEmit(result.reason)
+                ResolveResult.NotMedia -> Unit
+            }
         }
     }
 
@@ -173,18 +205,25 @@ class BrowserViewModel(
 
     override fun onPageStarted(tabId: String, url: String) {
         if (url == BLANK) return
-        updateTab(tabId) { it.copy(url = url, isLoading = true, progress = 5, detected = emptyList()) }
+        updateTab(tabId) {
+            // Our own load() already cleared the list; a new page from a link click clears
+            // in-page finds but keeps what came from a shared link.
+            val kept = if (url == it.url) it.detected else it.detected.filter { d -> d.origin == DetectionOrigin.SHARE_INTENT }
+            it.copy(url = url, isLoading = true, progress = 5, detected = kept)
+        }
     }
 
     override fun onPageFinished(tabId: String, url: String, title: String) {
         if (url == BLANK) return
         updateTab(tabId) { it.copy(url = url, isLoading = false, progress = 100, title = title.ifBlank { it.title }) }
         recordHistory(url, title)
+        resolvePageIfSupported(tabId, url, title)
     }
 
     override fun onUrlChanged(tabId: String, url: String) {
         if (url == BLANK) return
         updateTab(tabId) { it.copy(url = url) }
+        resolvePageIfSupported(tabId, url, null)
     }
 
     override fun onTitleChanged(tabId: String, title: String) = updateTab(tabId) { it.copy(title = title) }
@@ -223,13 +262,35 @@ class BrowserViewModel(
     // ---- Internals ------------------------------------------------------------
 
     private fun load(tabId: String, url: String) = updateTab(tabId) {
-        it.copy(url = url, pendingLoad = url, detected = emptyList(), isLoading = true, progress = 5)
+        it.copy(url = url, pendingLoad = url, detected = emptyList(), isLoading = true, progress = 5, resolvedPageUrl = null)
     }
 
+    /** Lets a dedicated site adapter describe the page itself (title, all qualities). */
+    private fun resolvePageIfSupported(tabId: String, url: String, title: String?) {
+        if (!settings.value.detectionEnabled || !detectionEngine.hasPageAdapter(url)) return
+        val tab = session.value.tabs.firstOrNull { it.id == tabId } ?: return
+        if (tab.resolvedPageUrl == url) return
+        updateTab(tabId) { it.copy(resolvedPageUrl = url) }
+        viewModelScope.launch {
+            val result = detectionEngine.resolvePage(
+                ResolveRequest(url = url, origin = DetectionOrigin.IN_APP_BROWSER, pageTitle = title),
+            )
+            if (result is ResolveResult.Found) addDetected(tabId, result.media)
+        }
+    }
+
+    /** Adds new finds; when the same file is found twice, keeps the richer description. */
     private fun addDetected(tabId: String, media: List<DetectedMedia>) = updateTab(tabId) { tab ->
-        val known = tab.detected.map { it.mediaUrl }.toHashSet()
-        val fresh = media.filter { known.add(it.mediaUrl) }
-        if (fresh.isEmpty()) tab else tab.copy(detected = (fresh + tab.detected).take(MAX_DETECTED_PER_TAB))
+        var list = tab.detected
+        for (item in media) {
+            val index = list.indexOfFirst { it.mediaUrl == item.mediaUrl || it.id == item.id }
+            list = when {
+                index < 0 -> listOf(item) + list
+                item.variants.size > list[index].variants.size -> list.toMutableList().also { it[index] = item }
+                else -> list
+            }
+        }
+        if (list === tab.detected) tab else tab.copy(detected = list.take(MAX_DETECTED_PER_TAB))
     }
 
     private fun recordHistory(url: String, title: String) {

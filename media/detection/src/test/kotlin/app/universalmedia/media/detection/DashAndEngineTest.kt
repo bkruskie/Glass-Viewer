@@ -55,7 +55,7 @@ class DashAndEngineTest {
 
     @Test
     fun engineMarksDrmSourcesAsProtected() = runBlocking {
-        val engine = MediaDetectionEngine(fallback = GenericMediaAdapter(fetcher = { _, _ -> drmMpd }, clock = { 42L }))
+        val engine = MediaDetectionEngine(fallback = GenericMediaAdapter(fetcher = FakeFetcher(mapOf("https://e.com/v/m.mpd" to drmMpd)), clock = { 42L }))
         val result = engine.resolve(ResolveRequest("https://e.com/v/m.mpd", DetectionOrigin.IN_APP_BROWSER, pageUrl = "https://www.e.com/watch"))
         val media = (result as ResolveResult.Found).media.single()
         assertEquals(MediaFormat.DASH, media.format)

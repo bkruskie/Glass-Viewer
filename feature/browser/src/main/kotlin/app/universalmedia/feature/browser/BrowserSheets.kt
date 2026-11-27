@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
@@ -35,8 +36,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.universalmedia.core.model.Availability
 import app.universalmedia.core.model.DetectedMedia
+import app.universalmedia.core.model.DetectionOrigin
+import app.universalmedia.core.model.formatBytes
 import app.universalmedia.core.model.formatDuration
 import app.universalmedia.core.ui.components.Pill
 import app.universalmedia.media.detection.UrlUtils
@@ -176,11 +185,11 @@ private fun MediaSheet(media: List<DetectedMedia>, onDismissItem: (String) -> Un
         items(media, key = { it.id }) { item ->
             MediaCard(
                 item = item,
-                onCopy = {
-                    clipboard.setText(AnnotatedString(item.mediaUrl))
+                onCopy = { url ->
+                    clipboard.setText(AnnotatedString(url))
                     Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
                 },
-                onOpenWith = { openWith(context, item) },
+                onOpenWith = { url -> openWith(context, item, url) },
                 onDismiss = { onDismissItem(item.id) },
             )
         }
@@ -188,7 +197,16 @@ private fun MediaSheet(media: List<DetectedMedia>, onDismissItem: (String) -> Un
 }
 
 @Composable
-private fun MediaCard(item: DetectedMedia, onCopy: () -> Unit, onOpenWith: () -> Unit, onDismiss: () -> Unit) {
+private fun MediaCard(
+    item: DetectedMedia,
+    onCopy: (String) -> Unit,
+    onOpenWith: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selected by remember(item.id) { mutableIntStateOf(0) }
+    val variants = item.variants.take(MAX_VARIANTS_SHOWN)
+    val chosen = variants.getOrNull(selected)
+    val chosenUrl = chosen?.url ?: item.mediaUrl
     val availabilityColor = when (item.availability) {
         Availability.SUPPORTED -> MaterialTheme.colorScheme.secondary
         Availability.PROTECTED, Availability.INACCESSIBLE -> MaterialTheme.colorScheme.error
@@ -205,9 +223,9 @@ private fun MediaCard(item: DetectedMedia, onCopy: () -> Unit, onOpenWith: () ->
             Pill(item.format.displayName, MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(6.dp))
             Pill(item.availability.label, availabilityColor)
-            item.bestVariant?.let {
+            if (item.origin == DetectionOrigin.SHARE_INTENT) {
                 Spacer(Modifier.width(6.dp))
-                Pill(it.label, MaterialTheme.colorScheme.onSurfaceVariant)
+                Pill("Shared", MaterialTheme.colorScheme.tertiary)
             }
             Spacer(Modifier.weight(1f))
             IconButton(onClick = onDismiss) {
@@ -221,13 +239,47 @@ private fun MediaCard(item: DetectedMedia, onCopy: () -> Unit, onOpenWith: () ->
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(end = 12.dp),
         )
-        val meta = listOfNotNull(item.sourceHost, item.durationMs?.let(::formatDuration)).joinToString(" · ")
+        val meta = listOfNotNull(
+            item.sourceHost,
+            item.durationMs?.let(::formatDuration),
+            if (variants.size <= 1) chosen?.estimatedBytes?.let { formatBytes(it) } else null,
+        ).joinToString(" · ")
         if (meta.isNotEmpty()) {
             Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         item.note?.let {
             Spacer(Modifier.height(4.dp))
             Text(it, style = MaterialTheme.typography.bodySmall, color = availabilityColor, modifier = Modifier.padding(end = 12.dp))
+        }
+        if (variants.size > 1) {
+            Spacer(Modifier.height(6.dp))
+            Text("Quality", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            variants.forEachIndexed { index, v ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = 12.dp)
+                        .clip(MaterialTheme.shapes.small)
+                        .selectable(selected = index == selected, role = Role.RadioButton, onClick = { selected = index })
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = index == selected, onClick = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        v.label + if (v.format != item.format) " · ${v.format.displayName}" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    v.estimatedBytes?.let {
+                        Text(
+                            "≈ ${formatBytes(it)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalButton(onClick = {}, enabled = false) {
@@ -236,13 +288,13 @@ private fun MediaCard(item: DetectedMedia, onCopy: () -> Unit, onOpenWith: () ->
                 Text("Save")
             }
             Spacer(Modifier.width(4.dp))
-            TextButton(onClick = onCopy) {
+            TextButton(onClick = { onCopy(chosenUrl) }) {
                 Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Copy link")
             }
             if (item.availability == Availability.SUPPORTED) {
-                TextButton(onClick = onOpenWith) {
+                TextButton(onClick = { onOpenWith(chosenUrl) }) {
                     Icon(Icons.Rounded.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Open")
@@ -304,9 +356,13 @@ private fun LinkListSheet(
     }
 }
 
-private fun openWith(context: Context, item: DetectedMedia) {
-    val mime = item.mimeType?.substringBefore(';') ?: item.format.mimeTypes.firstOrNull() ?: "video/*"
-    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(item.mediaUrl), mime)
+private const val MAX_VARIANTS_SHOWN = 8
+
+private fun openWith(context: Context, item: DetectedMedia, url: String) {
+    val format = item.variants.firstOrNull { it.url == url }?.format ?: item.format
+    val mime = (if (format == item.format) item.mimeType?.substringBefore(';') else null)
+        ?: format.mimeTypes.firstOrNull() ?: "video/*"
+    val intent = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url), mime)
     try {
         context.startActivity(Intent.createChooser(intent, "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     } catch (e: ActivityNotFoundException) {
