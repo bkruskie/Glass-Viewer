@@ -59,6 +59,23 @@
             </intent-filter>
         </activity>
 
+        <!-- "Save with Universal Media": checks a shared link in the background and answers with a notification. -->
+        <activity
+            android:name=".quicksave.QuickSaveActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:label="@string/quick_save_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter android:label="@string/quick_save_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".quicksave.QuickSaveReceiver" android:exported="false" />
+
         <!-- WorkManager's foreground service, typed for Android 14+. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

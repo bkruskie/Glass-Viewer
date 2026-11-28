@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Universal Media</string>
     <string name="share_label">Open in Universal Media</string>
+    <string name="quick_save_label">Save video</string>
 </resources>
