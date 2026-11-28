@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!--
+          Off until the user turns on "Notification access" for Universal Media.
+          Used only to read the title of what other apps are playing (MediaSession);
+          notifications themselves are never read or stored.
+        -->
+        <service
+            android:name=".otherapps.MediaWatchService"
+            android:exported="true"
+            android:label="@string/media_watch_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

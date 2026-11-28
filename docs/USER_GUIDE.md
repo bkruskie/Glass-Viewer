@@ -17,6 +17,8 @@ Free, private, no account. Everything stays on your phone and your own Wi-Fi.
 
 The app looks at the requests a page makes, the stream links in its code, and what the page declares about its own video (the tags sites use for link previews and search engines), so the media button often lights up before you press play.
 
+**Playing in other apps (optional):** turn on *See what other apps are playing* (Settings, or the card on the browser start page). The start page then lists what other apps are playing; tap one to open its link when the app shares one, or to search the web for it. Android only shares titles, not the video itself; the permission is called *Notification access*, and Universal Media never reads your notifications.
+
 You can also **share** a link to Universal Media from any app, or open copied links.
 
 Videos protected by DRM (most paid streaming services) can't be saved; the app says so instead of saving a broken file.

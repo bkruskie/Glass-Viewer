@@ -3,6 +3,7 @@ package app.universalmedia.feature.browser
 import android.app.Activity
 import android.content.ClipDescription
 import android.content.ClipboardManager
+import app.universalmedia.feature.browser.otherapps.OtherAppsMedia
 import android.widget.Toast
 import android.content.Context
 import android.content.ContextWrapper
@@ -215,6 +216,7 @@ fun BrowserScreen(
                     bookmarks = state.bookmarks,
                     onOpen = { viewModel.open(it) },
                     onOpenCopied = viewModel::openShared,
+                    onSearch = viewModel::submit,
                     modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
                 )
             }
@@ -432,9 +434,18 @@ private fun StartPage(
     bookmarks: List<BookmarkEntity>,
     onOpen: (String) -> Unit,
     onOpenCopied: (String) -> Unit,
+    onSearch: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    var otherAppsAllowed by remember { mutableStateOf(OtherAppsMedia.isAllowed(context)) }
+    LifecycleResumeEffect(Unit) {
+        otherAppsAllowed = OtherAppsMedia.isAllowed(context)
+        onPauseOrDispose { }
+    }
+    val elsewhere by remember(otherAppsAllowed) { OtherAppsMedia.observe(context) }
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    var explainOtherApps by remember { mutableStateOf(false) }
     val clipboard = remember { context.getSystemService(ClipboardManager::class.java) }
     var hasCopiedText by remember { mutableStateOf(false) }
     // Only the clip's description is checked here, which doesn't read its contents.
@@ -475,6 +486,30 @@ private fun StartPage(
             )
         }
 
+        if (otherAppsAllowed && elsewhere.isNotEmpty()) {
+            SectionHeader("Playing in other apps", Modifier.fillMaxWidth())
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                elsewhere.forEach { item ->
+                    val subtitle = listOfNotNull(item.appName, item.artist).joinToString(" · ")
+                    FeatureCard(
+                        Icons.Rounded.PlayCircle,
+                        item.title,
+                        if (item.webUrl != null) "$subtitle · tap to find the video" else "$subtitle · tap to search the web for it",
+                        onClick = {
+                            val link = item.webUrl
+                            if (link != null) onOpenCopied(link)
+                            else onSearch(listOfNotNull(item.title, item.artist).joinToString(" "))
+                        },
+                    )
+                }
+                Text(
+                    "Android shares only the title with other apps, not the video itself. Open the page that has it and the media button will show what can be saved.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         if (bookmarks.isNotEmpty()) {
             SectionHeader("Bookmarks", Modifier.fillMaxWidth())
             FlowRow(
@@ -500,6 +535,14 @@ private fun StartPage(
                 "In another app, tap Share → Universal Media to open and analyse a link here.",
                 tint = MaterialTheme.colorScheme.secondary,
             )
+            if (!otherAppsAllowed) {
+                FeatureCard(
+                    Icons.Rounded.PlayCircle,
+                    "See what other apps are playing",
+                    "Optional. Shows the title playing in other apps here, so you can find it in one tap.",
+                    onClick = { explainOtherApps = true },
+                )
+            }
             FeatureCard(
                 Icons.Rounded.Shield,
                 "Private by design",
@@ -508,6 +551,26 @@ private fun StartPage(
             )
         }
     }
+    if (explainOtherApps) {
+        OtherAppsDialog(onAllow = { OtherAppsMedia.openSettings(context) }, onDismiss = { explainOtherApps = false })
+    }
+}
+
+@Composable
+private fun OtherAppsDialog(onAllow: () -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("See what other apps are playing") },
+        text = {
+            Text(
+                "Android calls this permission \"Notification access\". Universal Media uses it only to read the title of what " +
+                    "other apps are playing, so it can offer to find it. It doesn't read, keep or send your notifications. " +
+                    "You can turn it off at any time in the same place.",
+            )
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { onDismiss(); onAllow() }) { Text("Open settings") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Not now") } },
+    )
 }
 
 /** Shows a page's fullscreen video above the whole app. Place at the root of the UI. */

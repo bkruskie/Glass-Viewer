@@ -111,6 +111,17 @@ fun SettingsScreen(
                 "Look for videos and audio on the pages you open in the app's browser",
                 settings.detectionEnabled,
             ) { v -> update { it.copy(detectionEnabled = v) } }
+            ClickRow(
+                "See what other apps are playing",
+                "Optional. Shows titles from other apps on the browser's start page. Turn on or off with Notification access",
+            ) {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }
 
             SectionHeader("Browser")
             ClickRow("Search engine", settings.searchEngine.displayName) { pickEngine = true }
